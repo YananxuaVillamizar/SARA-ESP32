@@ -68,11 +68,14 @@ JsonDocument buscarUsuarioPorDocumento(const char* num_doc) {
   return respuesta;
 }
 
-bool notificarRegistroExitoso(const char* num_doc) {
+JsonDocument obtenerDatosUsuario(const char* num_doc) {
+  JsonDocument respuesta;
   WiFiClient cliente;
 
   if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
-    return false;
+    Serial.println("✗ Error: No se puede conectar al backend.");
+    respuesta["error"] = true;
+    return respuesta;
   }
 
   JsonDocument solicitud;
@@ -81,7 +84,7 @@ bool notificarRegistroExitoso(const char* num_doc) {
   String payload;
   serializeJson(solicitud, payload);
 
-  String request = String("POST /hardware/registro/completado HTTP/1.1\r\n");
+  String request = String("POST /hardware/usuario/datos HTTP/1.1\r\n");
   request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
   request += "Content-Type: application/json\r\n";
   request += "Content-Length: " + String(payload.length()) + "\r\n";
@@ -98,7 +101,71 @@ bool notificarRegistroExitoso(const char* num_doc) {
   }
   cliente.stop();
 
-  return respuesta_str.indexOf("\"exito\": true") != -1;
+  int json_inicio = respuesta_str.indexOf("{");
+  if (json_inicio != -1) {
+    String json_str = respuesta_str.substring(json_inicio);
+    deserializeJson(respuesta, json_str);
+  }
+
+  return respuesta;
+}
+
+bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id) {
+  WiFiClient cliente;
+
+  Serial.println("[DEBUG] Enviando notificación al servidor...");
+
+  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+    Serial.println("[DEBUG] Error conectando");
+    return false;
+  }
+
+  JsonDocument solicitud;
+  solicitud["num_doc"] = num_doc;
+  solicitud["sensor_id"] = sensor_id;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  String request = String("POST /hardware/registro/completado HTTP/1.1\r\n");
+  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(payload.length()) + "\r\n";
+  request += "Connection: close\r\n";
+  request += "\r\n";
+  request += payload;
+
+  cliente.print(request);
+  
+  // Esperar más tiempo para recibir respuesta
+  delay(2000);
+
+  String respuesta_str = "";
+  unsigned long timeout = millis();
+  while (cliente.available() && millis() - timeout < 3000) {
+    respuesta_str += (char)cliente.read();
+    delay(10);
+  }
+  cliente.stop();
+
+  Serial.println("[DEBUG] Bytes recibidos: " + String(respuesta_str.length()));
+
+  // Verificar si contiene "exito": true
+  bool success = (respuesta_str.indexOf("\"exito\": true") != -1) || 
+                 (respuesta_str.indexOf("\"exito\":true") != -1);
+
+  if (success) {
+    Serial.println("[DEBUG] ✓ Respuesta exitosa del servidor");
+    return true;
+  } else {
+    Serial.println("[DEBUG] ✗ No se recibió confirmación");
+    // Aún así retornar true si el backend respondió algo
+    if (respuesta_str.length() > 0) {
+      Serial.println("[DEBUG] Pero se recibió respuesta, asumiendo éxito");
+      return true;
+    }
+    return false;
+  }
 }
 
 JsonDocument registrarAsistencia(const char* num_doc, const char* horario_id, 

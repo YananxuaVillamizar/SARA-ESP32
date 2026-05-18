@@ -22,8 +22,10 @@ extern Adafruit_Fingerprint finger;
 // =====================================================
 bool initFingerprintSensor();
 bool enrollFingerprintWithID(uint16_t id);
-bool searchFingerprintInSensor();
+bool searchFingerprintInSensorWithID(uint16_t sensor_id);
 int getFingerprintID();
 int getFingerprintConfidence();
+bool clearDatabase();
+
 
 #endif // BIOMETRIC_SENSOR_H

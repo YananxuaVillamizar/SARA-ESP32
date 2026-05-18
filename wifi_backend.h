@@ -11,7 +11,8 @@
 
 bool conectarWiFi();
 JsonDocument buscarUsuarioPorDocumento(const char* num_doc);
-bool notificarRegistroExitoso(const char* num_doc);
+JsonDocument obtenerDatosUsuario(const char* num_doc);
+bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id);
 JsonDocument registrarAsistencia(const char* num_doc, const char* horario_id, 
                                   const char* fecha, const char* hora, 
                                   const char* aula = nullptr);
