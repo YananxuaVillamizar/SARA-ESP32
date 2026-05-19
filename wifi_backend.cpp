@@ -168,9 +168,164 @@ bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id) {
   }
 }
 
-JsonDocument registrarAsistencia(const char* num_doc, const char* horario_id, 
-                                  const char* fecha, const char* hora, 
-                                  const char* aula) {
+JsonDocument obtenerAsignaturasUsuario(const char* num_doc) {
+  JsonDocument respuesta;
+  WiFiClient cliente;
+
+  Serial.println("[DEBUG] Obteniendo asignaturas...");
+
+  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+    Serial.println("[DEBUG] Error conectando al backend");
+    respuesta["error"] = true;
+    return respuesta;
+  }
+
+  JsonDocument solicitud;
+  solicitud["num_doc"] = num_doc;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  String request = String("POST /hardware/usuario/asignaturas HTTP/1.1\r\n");
+  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(payload.length()) + "\r\n";
+  request += "Connection: close\r\n";
+  request += "\r\n";
+  request += payload;
+
+  cliente.print(request);
+  delay(3000);  // Aumentar a 3 segundos
+
+  String respuesta_str = "";
+  unsigned long timeout = millis();
+  
+  // Esperar más tiempo y leer todo el buffer
+  while (millis() - timeout < 8000) {
+    while (cliente.available()) {
+      respuesta_str += (char)cliente.read();
+      delay(5);
+    }
+    delay(50);
+  }
+  cliente.stop();
+
+  int json_inicio = respuesta_str.indexOf("{");
+  if (json_inicio != -1) {
+    String json_str = respuesta_str.substring(json_inicio);
+    
+    Serial.println("[DEBUG ESP32] JSON recibido:");
+    Serial.println(json_str);
+    
+    DeserializationError error = deserializeJson(respuesta, json_str);
+    
+    if (error) {
+      Serial.print("[ERROR] deserializeJson falló: ");
+      Serial.println(error.c_str());
+    }
+  }
+
+  return respuesta;
+}
+
+JsonDocument obtenerAsignaturasPrograma(const char* num_doc, const char* programa_id) {
+  JsonDocument respuesta;
+  WiFiClient cliente;
+
+  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+    respuesta["error"] = true;
+    return respuesta;
+  }
+
+  JsonDocument solicitud;
+  solicitud["num_doc"] = num_doc;
+  solicitud["programa_id"] = programa_id;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  String request = String("POST /hardware/usuario/asignaturas-programa HTTP/1.1\r\n");
+  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(payload.length()) + "\r\n";
+  request += "Connection: close\r\n";
+  request += "\r\n";
+  request += payload;
+
+  cliente.print(request);
+  delay(3000);
+
+  String respuesta_str = "";
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 8000) {
+    while (cliente.available()) {
+      respuesta_str += (char)cliente.read();
+      delay(5);
+    }
+    delay(50);
+  }
+  cliente.stop();
+
+  int json_inicio = respuesta_str.indexOf("{");
+  if (json_inicio != -1) {
+    String json_str = respuesta_str.substring(json_inicio);
+    deserializeJson(respuesta, json_str);
+  }
+
+  return respuesta;
+}
+
+JsonDocument obtenerHorariosAsignatura(const char* num_doc, const char* asignatura_id) {
+  JsonDocument respuesta;
+  WiFiClient cliente;
+
+  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+    respuesta["error"] = true;
+    return respuesta;
+  }
+
+  JsonDocument solicitud;
+  solicitud["num_doc"] = num_doc;
+  solicitud["asignatura_id"] = asignatura_id;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  String request = String("POST /hardware/horarios/obtener HTTP/1.1\r\n");
+  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(payload.length()) + "\r\n";
+  request += "Connection: close\r\n";
+  request += "\r\n";
+  request += payload;
+
+  cliente.print(request);
+  delay(2000);
+
+  String respuesta_str = "";
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 8000) {
+    while (cliente.available()) {
+      respuesta_str += (char)cliente.read();
+      delay(5);
+    }
+    delay(50);
+  }
+  cliente.stop();
+
+  int json_inicio = respuesta_str.indexOf("{");
+  if (json_inicio != -1) {
+    String json_str = respuesta_str.substring(json_inicio);
+    deserializeJson(respuesta, json_str);
+  }
+
+  return respuesta;
+}
+
+JsonDocument registrarAsistenciaDocente(const char* num_doc, const char* horario_id,
+                                        const char* fecha, const char* hora, const char* aula) {
   JsonDocument respuesta;
   WiFiClient cliente;
 
@@ -182,16 +337,14 @@ JsonDocument registrarAsistencia(const char* num_doc, const char* horario_id,
   JsonDocument solicitud;
   solicitud["num_doc"] = num_doc;
   solicitud["horario_id"] = horario_id;
-  solicitud["fecha_registro"] = fecha;
-  solicitud["hora_registro"] = hora;
-  if (aula) {
-    solicitud["aula"] = aula;
-  }
+  solicitud["fecha"] = fecha;
+  solicitud["hora"] = hora;
+  solicitud["aula"] = aula;
 
   String payload;
   serializeJson(solicitud, payload);
 
-  String request = String("POST /hardware/asistencia/registrar HTTP/1.1\r\n");
+  String request = String("POST /hardware/asistencia/docente/registrar HTTP/1.1\r\n");
   request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
   request += "Content-Type: application/json\r\n";
   request += "Content-Length: " + String(payload.length()) + "\r\n";
@@ -200,11 +353,117 @@ JsonDocument registrarAsistencia(const char* num_doc, const char* horario_id,
   request += payload;
 
   cliente.print(request);
-  delay(1000);
+  delay(2000);
 
   String respuesta_str = "";
-  while (cliente.available()) {
-    respuesta_str += (char)cliente.read();
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 8000) {
+    while (cliente.available()) {
+      respuesta_str += (char)cliente.read();
+      delay(5);
+    }
+    delay(50);
+  }
+  cliente.stop();
+
+  int json_inicio = respuesta_str.indexOf("{");
+  if (json_inicio != -1) {
+    String json_str = respuesta_str.substring(json_inicio);
+    deserializeJson(respuesta, json_str);
+  }
+
+  return respuesta;
+}
+
+JsonDocument obtenerSesionesDisponibles(const char* num_doc, const char* fecha) {
+  JsonDocument respuesta;
+  WiFiClient cliente;
+
+  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+    respuesta["error"] = true;
+    return respuesta;
+  }
+
+  JsonDocument solicitud;
+  solicitud["num_doc"] = num_doc;
+  solicitud["fecha"] = fecha;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  String request = String("POST /hardware/sesiones/disponibles HTTP/1.1\r\n");
+  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(payload.length()) + "\r\n";
+  request += "Connection: close\r\n";
+  request += "\r\n";
+  request += payload;
+
+  cliente.print(request);
+  delay(2000);
+
+  String respuesta_str = "";
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 8000) {
+    while (cliente.available()) {
+      respuesta_str += (char)cliente.read();
+      delay(5);
+    }
+    delay(50);
+  }
+  cliente.stop();
+
+  int json_inicio = respuesta_str.indexOf("{");
+  if (json_inicio != -1) {
+    String json_str = respuesta_str.substring(json_inicio);
+    deserializeJson(respuesta, json_str);
+  }
+
+  return respuesta;
+}
+
+JsonDocument registrarAsistenciaEstudiante(const char* num_doc, const char* horario_id,
+                                           const char* fecha, const char* hora, const char* tipo) {
+  JsonDocument respuesta;
+  WiFiClient cliente;
+
+  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+    respuesta["error"] = true;
+    return respuesta;
+  }
+
+  JsonDocument solicitud;
+  solicitud["num_doc"] = num_doc;
+  solicitud["horario_id"] = horario_id;
+  solicitud["fecha"] = fecha;
+  solicitud["hora"] = hora;
+  solicitud["tipo"] = tipo;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  String request = String("POST /hardware/asistencia/estudiante/registrar HTTP/1.1\r\n");
+  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
+  request += "Content-Type: application/json\r\n";
+  request += "Content-Length: " + String(payload.length()) + "\r\n";
+  request += "Connection: close\r\n";
+  request += "\r\n";
+  request += payload;
+
+  cliente.print(request);
+  delay(2000);
+
+  String respuesta_str = "";
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 8000) {
+    while (cliente.available()) {
+      respuesta_str += (char)cliente.read();
+      delay(5);
+    }
+    delay(50);
   }
   cliente.stop();
 
