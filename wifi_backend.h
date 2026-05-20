@@ -19,7 +19,9 @@ JsonDocument obtenerHorariosAsignatura(const char* num_doc, const char* asignatu
 JsonDocument registrarAsistenciaDocente(const char* num_doc, const char* horario_id,
                                         const char* fecha, const char* hora, const char* aula);
 
+JsonDocument obtenerHorariosEstudianteAsignatura(const char* num_doc, const char* asignatura_id);
 JsonDocument obtenerSesionesDisponibles(const char* num_doc, const char* fecha);
+JsonDocument verificarTipoRegistro(const char* sesion_id, const char* num_doc);
 JsonDocument registrarAsistenciaEstudiante(const char* num_doc, const char* horario_id,
                                            const char* fecha, const char* hora, const char* tipo);
 
