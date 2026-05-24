@@ -17,12 +17,18 @@ JsonDocument obtenerAsignaturasUsuario(const char* num_doc);
 JsonDocument obtenerAsignaturasPrograma(const char* num_doc, const char* programa_id);
 JsonDocument obtenerHorariosAsignatura(const char* num_doc, const char* asignatura_id);
 JsonDocument registrarAsistenciaDocente(const char* num_doc, const char* horario_id,
+
                                         const char* fecha, const char* hora, const char* aula);
 
 JsonDocument obtenerHorariosEstudianteAsignatura(const char* num_doc, const char* asignatura_id);
 JsonDocument obtenerSesionesDisponibles(const char* num_doc, const char* fecha);
 JsonDocument verificarTipoRegistro(const char* sesion_id, const char* num_doc);
-JsonDocument registrarAsistenciaEstudiante(const char* num_doc, const char* horario_id,
-                                           const char* fecha, const char* hora, const char* tipo);
+JsonDocument obtenerDocenteSesion(const char* sesion_id);
+JsonDocument obtenerMetodoEntrada(const char* num_doc, const char* sesion_id);
+
+JsonDocument registrarAsistenciaEstudianteConMetodo(const char* num_doc, const char* horario_id,
+                                                     const char* fecha, const char* hora, const char* tipo,
+                                                     const char* metodo_verificacion);
+
 
 #endif // WIFI_BACKEND_H
