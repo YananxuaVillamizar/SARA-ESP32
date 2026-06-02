@@ -1,13 +1,51 @@
 #include "biometric_sensor.h"
 #include "wifi_backend.h"
 
+String obtenerDiaSemana(String fecha_str) {
+  // fecha_str formato: YYYY-MM-DD
+  // Usar librería para calcular día de la semana
+  // Por ahora usaremos una aproximación simple
+  
+  int year = fecha_str.substring(0, 4).toInt();
+  int month = fecha_str.substring(5, 7).toInt();
+  int day = fecha_str.substring(8, 10).toInt();
+  
+  // Algoritmo de Zeller para obtener día de la semana
+  if (month < 3) {
+    month += 12;
+    year--;
+  }
+  
+  int q = day;
+  int m = month;
+  int k = year % 100;
+  int j = year / 100;
+  
+  int h = (q + (13 * (m + 1)) / 5 + k + (k / 4) + (j / 4) - (2 * j)) % 7;
+  
+  // h: 0=Sat, 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri
+  String dias[] = {"sabado", "domingo", "lunes", "martes", "miercoles", "jueves", "viernes"};
+  
+  return dias[h];
+}
+
+String obtenerFechaHoraActual() {
+  time_t ahora = time(nullptr);
+  struct tm* timeinfo = localtime(&ahora);
+  
+  char buffer[20];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", timeinfo);
+  
+  return String(buffer);
+}
+
 String num_doc_usuario = "";
 String nombre_usuario = "";
 String usuario_id = "";
 
 void setup() {
   Serial.begin(115200);
-  delay(3000);
+  delay(1000);
 
   Serial.println("\n=== SARA - SISTEMA BIOMÉTRICO ===\n");
 
@@ -19,6 +57,29 @@ void setup() {
   if (!conectarWiFi()) {
     Serial.println("FATAL: WiFi no disponible");
     while (1);
+  }
+
+  // ★ SINCRONIZAR HORA CON NTP
+  Serial.println("\n[BOOT] Sincronizando hora con servidor NTP...");
+  
+  // Configurar zona horaria (Colombia es UTC-5)
+  configTime(-5 * 3600, 0, "pool.ntp.org", "time.nist.gov");
+  
+  // Esperar a que se sincronice
+  time_t ahora = time(nullptr);
+  int intentos = 0;
+  while (ahora < 24 * 3600 && intentos < 20) {
+    delay(500);
+    ahora = time(nullptr);
+    intentos++;
+  }
+  
+  if (ahora > 24 * 3600) {
+    struct tm timeinfo = *localtime(&ahora);
+    Serial.print("[OK] Hora sincronizada: ");
+    Serial.println(asctime(&timeinfo));
+  } else {
+    Serial.println("[WARN] No se pudo sincronizar la hora");
   }
 
   Serial.println("\n✓ Sistema listo\n");
@@ -165,6 +226,12 @@ void flujoRegistro() {
   Serial.println(nombre_usuario);
   Serial.print("Documento: ");
   Serial.println(num_doc_usuario);
+
+  // ★ VERIFICAR PIN ADMIN PRIMERO
+  if (!verificarPinAdmin()) {
+    mostrarMenuPrincipal();
+    return;
+  }
 
   // Verificar si el usuario ya tiene huella registrada
   Serial.println("\n→ Verificando si usuario ya tiene huella...");
@@ -323,6 +390,12 @@ void flujoVerificacion() {
 }
 
 void borrarTodasLasHuellas() {
+  // ★ VERIFICAR PIN ADMIN PRIMERO
+  if (!verificarPinAdmin()) {
+    mostrarMenuPrincipal();
+    return;
+  }
+
   Serial.println("\n═══════════════════════════════════");
   Serial.println("[BORRAR TODAS LAS HUELLAS]");
   Serial.println("═══════════════════════════════════");
@@ -373,444 +446,43 @@ void borrarTodasLasHuellas() {
 }
 
 void flujoAsistencia() {
-  Serial.print("\n[ASISTENCIA]\n");
+  Serial.println("\n[ASISTENCIA]\n");
   Serial.print("Usuario: ");
   Serial.println(nombre_usuario);
   Serial.print("Documento: ");
   Serial.println(num_doc_usuario);
 
-  // Paso 1: Obtener asignaturas del usuario
-  Serial.println("\n→ Obteniendo programas y asignaturas...");
+  // ★ OBTENER FECHA Y HORA AUTOMÁTICA
+  String fecha_hora = obtenerFechaHoraActual();
+  String fecha_str = fecha_hora.substring(0, 10); // YYYY-MM-DD
+  String hora_str = fecha_hora.substring(11, 19);  // HH:MM:SS
   
-  JsonDocument respuesta = obtenerAsignaturasUsuario(num_doc_usuario.c_str());
+  Serial.println("\n→ Fecha y hora actual obtenidas automáticamente");
+  Serial.print("   Fecha: ");
+  Serial.println(fecha_str);
+  Serial.print("   Hora: ");
+  Serial.println(hora_str);
+  
+  // ★ PASO 2: DETERMINAR SI ES DOCENTE O ESTUDIANTE
+  String rol = "";
+  JsonDocument datos_usuario = obtenerDatosUsuario(num_doc_usuario.c_str());
 
-  if (respuesta.containsKey("error")) {
-    Serial.println("✗ Error obteniendo asignaturas");
+  if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
+    Serial.println("✗ Error obteniendo datos del usuario");
     mostrarMenuPrincipal();
     return;
   }
 
-  if (!respuesta["existe"]) {
-    Serial.println("✗ No se encontraron datos");
-    mostrarMenuPrincipal();
-    return;
-  }
+  rol = datos_usuario["rol"].as<String>();
 
-  String rol = respuesta["rol"].as<String>();
-  bool requiere_selector = respuesta["requiere_selector_programa"];
-  
-  String horario_id = "";
-  String nombre_asignatura = "";
-  String asignatura_id = "";
-
-  // Si requiere selector de programa
-  if (requiere_selector) {
-    JsonArray programas = respuesta["programas"].as<JsonArray>();
-
-    Serial.println("\n→ Selecciona un programa:\n");
-    
-    if (rol == "Docente") {
-      Serial.println("(Tienes múltiples programas asignados.)\n");
-    } else {
-      Serial.println("(Tienes múltiples programas matriculados.)\n");
-    }
-
-    for (size_t i = 0; i < programas.size(); i++) {
-      String codigo = programas[i]["codigo"].as<String>();
-      String nombre = programas[i]["nombre"].as<String>();
-      
-      if (codigo.length() > 0 && nombre.length() > 0) {
-        Serial.print(i + 1);
-        Serial.print(". ");
-        Serial.print(nombre);
-        Serial.print(" (");
-        Serial.print(codigo);
-        Serial.println(")");
-      }
-    }
-
-    Serial.print("\nOpción (1-");
-    Serial.print(programas.size());
-    Serial.println("):\n");
-
-    // Esperar selección de programa
-    unsigned long timeout = millis();
-    int opcion_programa = -1;
-
-    while (millis() - timeout < 30000) {
-      if (Serial.available()) {
-        String entrada = Serial.readStringUntil('\n');
-        entrada.trim();
-        
-        int opcion = entrada.toInt();
-        
-        if (opcion > 0 && opcion <= (int)programas.size()) {
-          opcion_programa = opcion - 1;
-          break;
-        } else {
-          Serial.println("✗ Opción inválida. Intenta de nuevo:");
-        }
-      }
-      delay(100);
-    }
-
-    if (opcion_programa == -1) {
-      Serial.println("✗ Timeout");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    // Obtener asignaturas del programa seleccionado
-    Serial.println("\n→ Obteniendo asignaturas del programa...");
-    String programa_id = programas[opcion_programa]["programa_id"].as<String>();
-    String nombre_programa = programas[opcion_programa]["nombre"].as<String>();
-    
-    JsonDocument respuesta_asignaturas = obtenerAsignaturasPrograma(num_doc_usuario.c_str(), programa_id.c_str());
-
-    if (respuesta_asignaturas.containsKey("error")) {
-      Serial.println("✗ Error obteniendo asignaturas");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    JsonArray asignaturas = respuesta_asignaturas["asignaturas"].as<JsonArray>();
-
-    if (asignaturas.size() == 0) {
-      Serial.println("✗ No hay asignaturas en este programa");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    // Mostrar asignaturas del programa seleccionado
-    Serial.print("\n✓ Programa: ");
-    Serial.println(nombre_programa);
-    Serial.println("\n→ Asignaturas disponibles:\n");
-    
-    for (size_t i = 0; i < asignaturas.size(); i++) {
-      Serial.print(i + 1);
-      Serial.print(". ");
-      Serial.print(asignaturas[i]["nombre"].as<String>());
-      Serial.print(" (");
-      Serial.print(asignaturas[i]["codigo"].as<String>());
-      Serial.print(") - Grupo ");
-      Serial.println(asignaturas[i]["grupo"].as<String>());
-    }
-
-    Serial.print("\nSelecciona una asignatura (1-");
-    Serial.print(asignaturas.size());
-    Serial.println("):\n");
-
-    // Esperar selección de asignatura
-    timeout = millis();
-    int opcion_asignatura = -1;
-
-    while (millis() - timeout < 30000) {
-      if (Serial.available()) {
-        String entrada = Serial.readStringUntil('\n');
-        entrada.trim();
-        
-        int opcion = entrada.toInt();
-        
-        if (opcion > 0 && opcion <= (int)asignaturas.size()) {
-          opcion_asignatura = opcion - 1;
-          break;
-        } else {
-          Serial.println("✗ Opción inválida. Intenta de nuevo:");
-        }
-      }
-      delay(100);
-    }
-
-    if (opcion_asignatura == -1) {
-      Serial.println("✗ Timeout");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    // Guardar datos de la asignatura seleccionada
-    asignatura_id = asignaturas[opcion_asignatura]["asignatura_id"].as<String>();
-    nombre_asignatura = asignaturas[opcion_asignatura]["nombre"].as<String>();
-    
-    Serial.print("\n✓ Asignatura seleccionada: ");
-    Serial.println(nombre_asignatura);
-
-    // ★ SELECTOR DE HORARIOS
-    if (rol == "Docente") {
-      Serial.println("\n→ Horarios disponibles para esta asignatura:\n");
-      
-      JsonDocument horarios_resp = obtenerHorariosAsignatura(
-        num_doc_usuario.c_str(),
-        asignatura_id.c_str()
-      );
-
-      if (horarios_resp.containsKey("error")) {
-        Serial.println("✗ Error obteniendo horarios");
-        mostrarMenuPrincipal();
-        return;
-      }
-
-      JsonArray horarios = horarios_resp["horarios"].as<JsonArray>();
-
-      if (horarios.size() == 0) {
-        Serial.println("✗ No hay horarios disponibles");
-        mostrarMenuPrincipal();
-        return;
-      }
-
-      for (size_t i = 0; i < horarios.size(); i++) {
-        Serial.print(i + 1);
-        Serial.print(". ");
-        Serial.print(horarios[i]["dia_semana"].as<String>());
-        Serial.print(" ");
-        Serial.print(horarios[i]["hora_inicio"].as<String>());
-        Serial.print(" - ");
-        Serial.println(horarios[i]["hora_fin"].as<String>());
-      }
-
-      Serial.print("\nSelecciona un horario (1-");
-      Serial.print(horarios.size());
-      Serial.println("):\n");
-
-      timeout = millis();
-      int opcion_horario = -1;
-
-      while (millis() - timeout < 30000) {
-        if (Serial.available()) {
-          String entrada = Serial.readStringUntil('\n');
-          entrada.trim();
-          
-          int opcion = entrada.toInt();
-          
-          if (opcion > 0 && opcion <= (int)horarios.size()) {
-            opcion_horario = opcion - 1;
-            break;
-          } else {
-            Serial.println("✗ Opción inválida. Intenta de nuevo:");
-          }
-        }
-        delay(100);
-      }
-
-      if (opcion_horario == -1) {
-        Serial.println("✗ Timeout");
-        mostrarMenuPrincipal();
-        return;
-      }
-
-      horario_id = horarios[opcion_horario]["horario_id"].as<String>();
-
-      Serial.print("\n✓ Horario seleccionado: ");
-      Serial.print(horarios[opcion_horario]["dia_semana"].as<String>());
-      Serial.print(" ");
-      Serial.print(horarios[opcion_horario]["hora_inicio"].as<String>());
-      Serial.print(" - ");
-      Serial.println(horarios[opcion_horario]["hora_fin"].as<String>());
-    } else {
-      // Para estudiantes: obtener horario_id de la asignatura
-      horario_id = asignaturas[opcion_asignatura]["horario_id"].as<String>();
-    }
-
-  } else {
-    // No requiere selector, procesar asignaturas directamente
-    JsonArray asignaturas = respuesta["asignaturas"].as<JsonArray>();
-
-    if (asignaturas.size() == 0) {
-      Serial.println("✗ El usuario no tiene asignaturas asignadas");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    // Mostrar asignaturas disponibles
-    Serial.println("\n→ Asignaturas disponibles:\n");
-    
-    for (size_t i = 0; i < asignaturas.size(); i++) {
-      Serial.print(i + 1);
-      Serial.print(". ");
-      Serial.print(asignaturas[i]["nombre"].as<String>());
-      Serial.print(" (");
-      Serial.print(asignaturas[i]["codigo"].as<String>());
-      Serial.print(") - Grupo ");
-      Serial.println(asignaturas[i]["grupo"].as<String>());
-    }
-
-    Serial.print("\nSelecciona una asignatura (1-");
-    Serial.print(asignaturas.size());
-    Serial.println("):\n");
-
-    // Esperar selección
-    unsigned long timeout = millis();
-    int opcion_seleccionada = -1;
-
-    while (millis() - timeout < 30000) {
-      if (Serial.available()) {
-        String entrada = Serial.readStringUntil('\n');
-        entrada.trim();
-        
-        int opcion = entrada.toInt();
-        
-        if (opcion > 0 && opcion <= (int)asignaturas.size()) {
-          opcion_seleccionada = opcion - 1;
-          break;
-        } else {
-          Serial.println("✗ Opción inválida. Intenta de nuevo:");
-        }
-      }
-      delay(100);
-    }
-
-    if (opcion_seleccionada == -1) {
-      Serial.println("✗ Timeout");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    // Obtener datos de la asignatura seleccionada
-    JsonObject asignatura_seleccionada = asignaturas[opcion_seleccionada];
-    horario_id = asignatura_seleccionada["horario_id"].as<String>();
-    nombre_asignatura = asignatura_seleccionada["nombre"].as<String>();
-    asignatura_id = asignatura_seleccionada["asignatura_id"].as<String>();
-
-    Serial.print("\n✓ Asignatura seleccionada: ");
-    Serial.println(nombre_asignatura);
-
-    // Para estudiantes con un solo programa: mostrar horarios disponibles
-    if (rol == "Estudiante") {
-      Serial.println("\n→ Horarios disponibles para esta asignatura:\n");
-      
-      JsonDocument horarios_resp = obtenerHorariosAsignatura(
-        num_doc_usuario.c_str(),
-        asignatura_id.c_str()
-      );
-
-      if (horarios_resp.containsKey("error")) {
-        Serial.println("✗ Error obteniendo horarios");
-        mostrarMenuPrincipal();
-        return;
-      }
-
-      JsonArray horarios = horarios_resp["horarios"].as<JsonArray>();
-
-      if (horarios.size() == 0) {
-        Serial.println("✗ No hay horarios disponibles");
-        mostrarMenuPrincipal();
-        return;
-      }
-
-      for (size_t i = 0; i < horarios.size(); i++) {
-        Serial.print(i + 1);
-        Serial.print(". ");
-        Serial.print(horarios[i]["dia_semana"].as<String>());
-        Serial.print(" ");
-        Serial.print(horarios[i]["hora_inicio"].as<String>());
-        Serial.print(" - ");
-        Serial.println(horarios[i]["hora_fin"].as<String>());
-      }
-
-      Serial.print("\nSelecciona un horario (1-");
-      Serial.print(horarios.size());
-      Serial.println("):\n");
-
-      unsigned long timeout = millis();
-      int opcion_horario = -1;
-
-      while (millis() - timeout < 30000) {
-        if (Serial.available()) {
-          String entrada = Serial.readStringUntil('\n');
-          entrada.trim();
-          
-          int opcion = entrada.toInt();
-          
-          if (opcion > 0 && opcion <= (int)horarios.size()) {
-            opcion_horario = opcion - 1;
-            break;
-          } else {
-            Serial.println("✗ Opción inválida. Intenta de nuevo:");
-          }
-        }
-        delay(100);
-      }
-
-      if (opcion_horario == -1) {
-        Serial.println("✗ Timeout");
-        mostrarMenuPrincipal();
-        return;
-      }
-
-      horario_id = horarios[opcion_horario]["horario_id"].as<String>();
-
-      Serial.print("\n✓ Horario seleccionado: ");
-      Serial.print(horarios[opcion_horario]["dia_semana"].as<String>());
-      Serial.print(" ");
-      Serial.print(horarios[opcion_horario]["hora_inicio"].as<String>());
-      Serial.print(" - ");
-      Serial.println(horarios[opcion_horario]["hora_fin"].as<String>());
-    }
-  }
-
-  // SOLICITAR FECHA Y HORA SOLO PARA DOCENTES
   if (rol == "Docente") {
-    Serial.println("\nIngresa la fecha (formato YYYY-MM-DD, ej: 2026-05-17):");
-    String fecha_str = "";
-    unsigned long timeout = millis();
-
-    while (millis() - timeout < 30000) {
-      if (Serial.available()) {
-        fecha_str = Serial.readStringUntil('\n');
-        fecha_str.trim();
-        
-        if (fecha_str.length() == 10 && fecha_str[4] == '-' && fecha_str[7] == '-') {
-          break;
-        } else {
-          Serial.println("✗ Formato inválido. Intenta de nuevo:");
-        }
-      }
-      delay(100);
-    }
-
-    if (fecha_str.length() != 10) {
-      Serial.println("✗ Timeout o fecha inválida");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    Serial.print("✓ Fecha: ");
-    Serial.println(fecha_str);
-
-    Serial.println("\nIngresa la hora (formato HH:MM:SS, ej: 14:30:00):");
-    String hora_str = "";
-    timeout = millis();
-
-    while (millis() - timeout < 30000) {
-      if (Serial.available()) {
-        hora_str = Serial.readStringUntil('\n');
-        hora_str.trim();
-        
-        if (hora_str.length() == 8 && hora_str[2] == ':' && hora_str[5] == ':') {
-          break;
-        } else {
-          Serial.println("✗ Formato inválido. Intenta de nuevo:");
-        }
-      }
-      delay(100);
-    }
-
-    if (hora_str.length() != 8) {
-      Serial.println("✗ Timeout o hora inválida");
-      mostrarMenuPrincipal();
-      return;
-    }
-
-    Serial.print("✓ Hora: ");
-    Serial.println(hora_str);
-
-    // Procesar docente
-    procesarAsistenciaDocente(num_doc_usuario, horario_id, fecha_str, hora_str);
-    
+    procesarAsistenciaDocente(num_doc_usuario, fecha_str);
   } else if (rol == "Estudiante") {
-    // Para estudiante, la fecha y hora se solicitan dentro de procesarAsistenciaEstudiante()
-    procesarAsistenciaEstudiante(num_doc_usuario, horario_id, "", "", asignatura_id);
+    procesarAsistenciaEstudiante(num_doc_usuario, fecha_str);
   } else {
     Serial.println("✗ Rol no reconocido");
+    mostrarMenuPrincipal();
+    return;
   }
 
   num_doc_usuario = "";
@@ -827,90 +499,279 @@ void flujoAsistencia() {
   mostrarMenuPrincipal();
 }
 
-void procesarAsistenciaDocente(String num_doc, String horario_id, String fecha, String hora) {
+
+void procesarAsistenciaDocente(String num_doc, String fecha) {
   Serial.println("\n[DOCENTE - ASISTENCIA]\n");
 
-  // ★ PASO 1: VERIFICAR SI ES ENTRADA O SALIDA
-  Serial.println("→ Determinando tipo de registro...");
+  // Variables globales para toda la función
+  String sesion_id = "";
+  String horario_id = "";
+  String aula = "";
+
+  // ★ PASO 1: VERIFICAR SI HAY SESIONES ABIERTAS
+  Serial.println("→ Verificando sesiones abiertas...");
   
-  WiFiClient cliente;
-  
-  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+  JsonDocument sesiones_resp = verificarSesionesDocente(num_doc.c_str(), fecha.c_str());
+
+  if (sesiones_resp.containsKey("error")) {
     Serial.println("✗ Error conectando al servidor");
     return;
   }
 
-  JsonDocument solicitud;
-  solicitud["horario_id"] = horario_id;
-  solicitud["fecha"] = fecha;
+  bool hay_sesiones = sesiones_resp["hay_sesiones"];
 
-  String payload;
-  serializeJson(solicitud, payload);
+  if (hay_sesiones) {
+    // ★ HAY SESIÓN ABIERTA: REGISTRAR SALIDA
+    Serial.println("✓ Sesión abierta encontrada. Registrando SALIDA.\n");
 
-  String request = String("POST /hardware/sesiones/verificar HTTP/1.1\r\n");
-  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
-  request += "Content-Type: application/json\r\n";
-  request += "Content-Length: " + String(payload.length()) + "\r\n";
-  request += "Connection: close\r\n";
-  request += "\r\n";
-  request += payload;
+    String sesion_id = sesiones_resp["sesion_id"].as<String>();
+    horario_id = sesiones_resp["horario_id"].as<String>();
 
-  cliente.print(request);
-  delay(1500);
-
-  String respuesta_str = "";
-  unsigned long timeout_resp = millis();
-  
-  while (millis() - timeout_resp < 5000) {
-    while (cliente.available()) {
-      respuesta_str += (char)cliente.read();
-      delay(5);
+    // Obtener datos completos del horario para mostrar información
+    JsonDocument horario_completo = obtenerHorarioCompleto(horario_id.c_str());
+    
+    if (horario_completo["existe"]) {
+      String asignatura_id = horario_completo["asignatura_id"].as<String>();
+      String grupo = horario_completo["grupo"].as<String>();
+      String hora_inicio = horario_completo["hora_inicio"].as<String>();
+      String hora_fin = horario_completo["hora_fin"].as<String>();
+      
+      // Obtener nombre de asignatura
+      JsonDocument asignatura_datos = obtenerDatosAsignatura(asignatura_id.c_str());
+      
+      if (asignatura_datos["existe"]) {
+        String nombre_asignatura = asignatura_datos["nombre"].as<String>();
+        String codigo_asignatura = asignatura_datos["codigo"].as<String>();
+        
+        Serial.print("→ Sesión: ");
+        Serial.print(nombre_asignatura);
+        Serial.print(" (");
+        Serial.print(codigo_asignatura);
+        Serial.print(") - Grupo ");
+        Serial.print(grupo);
+        Serial.print(" - ");
+        Serial.print(hora_inicio);
+        Serial.print(" a ");
+        Serial.println(hora_fin);
+      }
     }
-    delay(50);
-  }
-  cliente.stop();
 
-  JsonDocument verificacion;
-  int json_inicio = respuesta_str.indexOf("{");
-  if (json_inicio != -1) {
-    String json_str = respuesta_str.substring(json_inicio);
-    deserializeJson(verificacion, json_str);
-  }
-
-  bool hay_sesion = verificacion["hay_sesion_abierta"];
+    // ★ OBTENER FECHA Y HORA AUTOMÁTICA
+  String fecha_hora = obtenerFechaHoraActual();
+  String fecha_str = fecha_hora.substring(0, 10); // YYYY-MM-DD
+  String hora_str = fecha_hora.substring(11, 19);  // HH:MM:SS
   
-  String aula = "";
+  Serial.println("\n→ Fecha y hora actual obtenidas automáticamente");
+  Serial.print("   Fecha: ");
+  Serial.println(fecha_str);
+  Serial.print("   Hora: ");
+  Serial.println(hora_str);
 
-  if (!hay_sesion) {
-    // ENTRADA: No hay sesión, pedir aula
+
+    // Verificar huella
+    Serial.println("\n→ Verificando identidad biométrica...");
+    
+    JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
+
+    if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
+      Serial.println("✗ Error obteniendo datos del usuario");
+      return;
+    }
+
+    int sensor_id = datos_usuario["sensor_id"];
+
+    if (sensor_id == -1) {
+      Serial.println("✗ El usuario no tiene huella registrada");
+      return;
+    }
+
+    if (!searchFingerprintInSensorWithID(sensor_id)) {
+      Serial.println("✗ Verificación biométrica fallida");
+      return;
+    }
+
+    Serial.println("✓ Identidad verificada\n");
+
+    // Registrar salida
+    Serial.println("→ Registrando asistencia...");
+    
+    horario_id = sesiones_resp["horario_id"].as<String>();
+    String aula = sesiones_resp["aula"].as<String>();
+
+    JsonDocument respuesta = registrarAsistenciaDocente(
+      num_doc.c_str(),
+      horario_id.c_str(),
+      fecha.c_str(),
+      hora_str.c_str(),
+      aula.c_str()
+    );
+
+    if (respuesta.containsKey("error")) {
+      Serial.println("✗ Error conectando al servidor");
+      return;
+    }
+
+    bool exito = respuesta["exito"];
+    String mensaje = respuesta["mensaje"].as<String>();
+
+    if (exito) {
+      Serial.print("✓ ");
+      Serial.println(mensaje);
+    } else {
+      String error_msg = respuesta["detail"].as<String>();
+      Serial.print("✗ Error: ");
+      Serial.println(error_msg);
+    }
+
+  } else {
+    // ★ NO HAY SESIÓN: REGISTRAR ENTRADA
     Serial.println("✓ No hay sesión abierta. Registrando ENTRADA.\n");
-    
-    Serial.println("Ingresa el aula (ej: A101):");
+
+    // Limpiar buffer
+    while (Serial.available()) {
+      Serial.read();
+    }
+    delay(200);
+
+    Serial.println("¿Qué tipo de sesión?");
+    Serial.println("1 -> Ordinaria (según horario)");
+    Serial.println("2 -> Extraordinaria (fuera del horario)\n");
+
     unsigned long timeout = millis();
-    
-    while (millis() - timeout < 15000 && aula.length() == 0) {
+    char tipo_sesion_char = '0';
+
+    while (millis() - timeout < 15000 && tipo_sesion_char == '0') {
       if (Serial.available()) {
-        aula = Serial.readStringUntil('\n');
-        aula.trim();
+        tipo_sesion_char = Serial.read();
       }
       delay(100);
     }
 
-    if (aula.length() == 0) {
-      Serial.println("✗ Timeout");
+    if (tipo_sesion_char == '1') {
+      // SESIÓN ORDINARIA
+      procesarSesionOrdinaria(num_doc, fecha);
+    } else if (tipo_sesion_char == '2') {
+      // SESIÓN EXTRAORDINARIA
+      procesarSesionExtraordinaria(num_doc, fecha);
+    } else {
+      Serial.println("✗ Opción inválida");
       return;
     }
+  }
+}
 
-    Serial.print("✓ Aula: ");
-    Serial.println(aula);
-    
-  } else {
-    // SALIDA: Hay sesión abierta
-    Serial.println("✓ Sesión abierta encontrada. Registrando SALIDA.\n");
+
+void procesarSesionOrdinaria(String num_doc, String fecha) {
+  Serial.println("\n[SESIÓN ORDINARIA]\n");
+
+  // Obtener día de la semana
+  String dia_semana = obtenerDiaSemana(fecha);
+  Serial.print("→ Día: ");
+  Serial.println(dia_semana);
+
+  // Obtener asignaturas para este día
+  Serial.println("\n→ Asignaturas disponibles para este día:\n");
+
+  JsonDocument asignaturas_resp = obtenerAsignaturasDocentePorDia(num_doc.c_str(), dia_semana.c_str());
+
+  if (asignaturas_resp.containsKey("error") || !asignaturas_resp["existe"]) {
+    Serial.println("✗ No hay asignaturas para este día");
+    return;
   }
 
-  // ★ PASO 2: VERIFICAR HUELLA (después de determinar tipo de registro)
-  Serial.println("→ Verificando identidad biométrica...");
+  JsonArray asignaturas = asignaturas_resp["asignaturas"].as<JsonArray>();
+
+  if (asignaturas.size() == 0) {
+    Serial.println("✗ No hay asignaturas para este día");
+    return;
+  }
+
+  for (size_t i = 0; i < asignaturas.size(); i++) {
+    Serial.print(i + 1);
+    Serial.print(". ");
+    Serial.print(asignaturas[i]["nombre"].as<String>());
+    Serial.print(" (");
+    Serial.print(asignaturas[i]["codigo"].as<String>());
+    Serial.print(") - Grupo ");
+    Serial.print(asignaturas[i]["grupo"].as<String>());
+    Serial.print(" - ");
+    Serial.print(asignaturas[i]["hora_inicio"].as<String>());
+    Serial.print(" a ");
+    Serial.println(asignaturas[i]["hora_fin"].as<String>());
+  }
+
+  // Limpiar buffer antes del menú
+  while (Serial.available()) {
+    Serial.read();
+  }
+  delay(200);
+
+  Serial.print("\nSelecciona una asignatura (1-");
+  Serial.print(asignaturas.size());
+  Serial.println("):\n");
+
+  unsigned long timeout = millis();
+  int opcion_asignatura = -1;
+
+  while (millis() - timeout < 30000) {
+    if (Serial.available()) {
+      String entrada = Serial.readStringUntil('\n');
+      entrada.trim();
+      
+      int opcion = entrada.toInt();
+      
+      if (opcion > 0 && opcion <= (int)asignaturas.size()) {
+        opcion_asignatura = opcion - 1;
+        break;
+      } else {
+        Serial.println("✗ Opción inválida. Intenta de nuevo:");
+      }
+    }
+    delay(100);
+  }
+
+  if (opcion_asignatura == -1) {
+    Serial.println("✗ Timeout");
+    return;
+  }
+
+  String horario_id = asignaturas[opcion_asignatura]["horario_id"].as<String>();
+  String aula = asignaturas[opcion_asignatura]["aula"].as<String>();
+
+  Serial.print("\n✓ Seleccionado: ");
+  Serial.print(asignaturas[opcion_asignatura]["nombre"].as<String>());
+  Serial.print(" - ");
+  Serial.println(asignaturas[opcion_asignatura]["hora_inicio"].as<String>());
+
+  // Solicitar aula
+  Serial.println("\nIngresa el aula donde se realizará la clase (ej: A101):");
+  String aula_ingresada = "";
+  timeout = millis();
+
+  while (millis() - timeout < 30000) {
+    if (Serial.available()) {
+      aula_ingresada = Serial.readStringUntil('\n');
+      aula_ingresada.trim();
+      
+      if (aula_ingresada.length() > 0) {
+        break;
+      } else {
+        Serial.println("✗ Aula inválida. Intenta de nuevo:");
+      }
+    }
+    delay(100);
+  }
+
+  if (aula_ingresada.length() == 0) {
+    Serial.println("✗ Timeout");
+    return;
+  }
+
+  Serial.print("✓ Aula: ");
+  Serial.println(aula_ingresada);
+
+  // Verificar huella
+  Serial.println("\n→ Verificando identidad biométrica...");
   
   JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
 
@@ -933,14 +794,19 @@ void procesarAsistenciaDocente(String num_doc, String horario_id, String fecha, 
 
   Serial.println("✓ Identidad verificada\n");
 
-  // ★ PASO 3: REGISTRAR ASISTENCIA
+  // Registrar entrada
   Serial.println("→ Registrando asistencia...");
   
+  // ★ OBTENER FECHA Y HORA AUTOMÁTICAMENTE
+  String fecha_hora_actual = obtenerFechaHoraActual();
+  String fecha_str = fecha_hora_actual.substring(0, 10);  // YYYY-MM-DD
+  String hora_str = fecha_hora_actual.substring(11, 19);  // HH:MM:SS
+  
   JsonDocument respuesta = registrarAsistenciaDocente(
-    num_doc.c_str(),
+    num_doc_usuario.c_str(),
     horario_id.c_str(),
-    fecha.c_str(),
-    hora.c_str(),
+    fecha_str.c_str(),
+    hora_str.c_str(),
     aula.c_str()
   );
 
@@ -962,13 +828,81 @@ void procesarAsistenciaDocente(String num_doc, String horario_id, String fecha, 
   }
 }
 
-void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fecha, String hora, String asignatura_id) {
-  Serial.println("\n[ESTUDIANTE - ASISTENCIA]\n");
+void procesarSesionExtraordinaria(String num_doc, String fecha) {
+  Serial.println("\n[SESIÓN EXTRAORDINARIA]\n");
 
-  // ★ PASO 1: MOSTRAR HORARIOS DE CLASE
-  Serial.println("→ Horarios disponibles para esta asignatura:\n");
-  
-  JsonDocument horarios_resp = obtenerHorariosEstudianteAsignatura(num_doc.c_str(), asignatura_id.c_str());
+  // Obtener todas las asignaturas del docente
+  Serial.println("→ Asignaturas disponibles:\n");
+
+  JsonDocument asignaturas_resp = obtenerTodasAsignaturasDocente(num_doc.c_str());
+
+  if (asignaturas_resp.containsKey("error") || !asignaturas_resp["existe"]) {
+    Serial.println("✗ No hay asignaturas disponibles");
+    return;
+  }
+
+  JsonArray asignaturas = asignaturas_resp["asignaturas"].as<JsonArray>();
+
+  if (asignaturas.size() == 0) {
+    Serial.println("✗ No hay asignaturas disponibles");
+    return;
+  }
+
+  for (size_t i = 0; i < asignaturas.size(); i++) {
+    Serial.print(i + 1);
+    Serial.print(". ");
+    Serial.print(asignaturas[i]["nombre"].as<String>());
+    Serial.print(" (");
+    Serial.print(asignaturas[i]["codigo"].as<String>());
+    Serial.print(") - Grupo ");
+    Serial.println(asignaturas[i]["grupo"].as<String>());
+  }
+
+  // Limpiar buffer antes del menú
+  while (Serial.available()) {
+    Serial.read();
+  }
+  delay(200);
+
+  Serial.print("\nSelecciona una asignatura (1-");
+  Serial.print(asignaturas.size());
+  Serial.println("):\n");
+
+  unsigned long timeout = millis();
+  int opcion_asignatura = -1;
+
+  while (millis() - timeout < 30000) {
+    if (Serial.available()) {
+      String entrada = Serial.readStringUntil('\n');
+      entrada.trim();
+      
+      int opcion = entrada.toInt();
+      
+      if (opcion > 0 && opcion <= (int)asignaturas.size()) {
+        opcion_asignatura = opcion - 1;
+        break;
+      } else {
+        Serial.println("✗ Opción inválida. Intenta de nuevo:");
+      }
+    }
+    delay(100);
+  }
+
+  if (opcion_asignatura == -1) {
+    Serial.println("✗ Timeout");
+    return;
+  }
+
+  String asignatura_id = asignaturas[opcion_asignatura]["asignatura_id"].as<String>();
+  String asignatura_nombre = asignaturas[opcion_asignatura]["nombre"].as<String>();
+
+  Serial.print("\n✓ Seleccionado: ");
+  Serial.println(asignatura_nombre);
+
+  // Obtener horarios para esta asignatura
+  Serial.println("\n→ Horarios disponibles para esta asignatura:\n");
+
+  JsonDocument horarios_resp = obtenerHorariosAsignaturaDocente(num_doc.c_str(), asignatura_id.c_str());
 
   if (horarios_resp.containsKey("error") || !horarios_resp["existe"]) {
     Serial.println("✗ No hay horarios disponibles");
@@ -978,7 +912,7 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
   JsonArray horarios = horarios_resp["horarios"].as<JsonArray>();
 
   if (horarios.size() == 0) {
-    Serial.println("✗ No hay horarios para tu grupo");
+    Serial.println("✗ No hay horarios disponibles");
     return;
   }
 
@@ -986,9 +920,9 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
     Serial.print(i + 1);
     Serial.print(". ");
     Serial.print(horarios[i]["dia_semana"].as<String>());
-    Serial.print(" ");
-    Serial.print(horarios[i]["hora_inicio"].as<String>());
     Serial.print(" - ");
+    Serial.print(horarios[i]["hora_inicio"].as<String>());
+    Serial.print(" a ");
     Serial.println(horarios[i]["hora_fin"].as<String>());
   }
 
@@ -996,8 +930,7 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
   Serial.print(horarios.size());
   Serial.println("):\n");
 
-  // ★ PASO 2: SELECCIONAR HORARIO
-  unsigned long timeout = millis();
+  timeout = millis();
   int opcion_horario = -1;
 
   while (millis() - timeout < 30000) {
@@ -1022,182 +955,500 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
     return;
   }
 
-  horario_id = horarios[opcion_horario]["horario_id"].as<String>();
+  String horario_id = horarios[opcion_horario]["horario_id"].as<String>();
+  String aula = horarios[opcion_horario]["aula"].as<String>();
 
   Serial.print("\n✓ Horario seleccionado: ");
   Serial.print(horarios[opcion_horario]["dia_semana"].as<String>());
-  Serial.print(" ");
-  Serial.print(horarios[opcion_horario]["hora_inicio"].as<String>());
   Serial.print(" - ");
-  Serial.println(horarios[opcion_horario]["hora_fin"].as<String>());
+  Serial.println(horarios[opcion_horario]["hora_inicio"].as<String>());
 
-  // ★ PASO 3: INGRESAR FECHA Y HORA PARA VERIFICACIÓN
-  Serial.println("\nIngresa la fecha (formato YYYY-MM-DD, ej: 2026-05-17):");
-  String fecha_ingresada = "";
+  // Solicitar aula
+  Serial.println("\nIngresa el aula donde se realizará la clase (ej: A101):");
+  String aula_ingresada = "";
   timeout = millis();
 
   while (millis() - timeout < 30000) {
     if (Serial.available()) {
-      fecha_ingresada = Serial.readStringUntil('\n');
-      fecha_ingresada.trim();
+      aula_ingresada = Serial.readStringUntil('\n');
+      aula_ingresada.trim();
       
-      if (fecha_ingresada.length() == 10 && fecha_ingresada[4] == '-' && fecha_ingresada[7] == '-') {
+      if (aula_ingresada.length() > 0) {
         break;
       } else {
-        Serial.println("✗ Formato inválido. Intenta de nuevo:");
+        Serial.println("✗ Aula inválida. Intenta de nuevo:");
       }
     }
     delay(100);
   }
 
-  if (fecha_ingresada.length() != 10) {
-    Serial.println("✗ Timeout o fecha inválida");
+  if (aula_ingresada.length() == 0) {
+    Serial.println("✗ Timeout");
     return;
   }
 
-  Serial.print("✓ Fecha: ");
-  Serial.println(fecha_ingresada);
+  Serial.print("✓ Aula: ");
+  Serial.println(aula_ingresada);
 
-  Serial.println("\nIngresa la hora (formato HH:MM:SS, ej: 14:30:00):");
-  String hora_ingresada = "";
-  timeout = millis();
 
-  while (millis() - timeout < 30000) {
-    if (Serial.available()) {
-      hora_ingresada = Serial.readStringUntil('\n');
-      hora_ingresada.trim();
-      
-      if (hora_ingresada.length() == 8 && hora_ingresada[2] == ':' && hora_ingresada[5] == ':') {
-        break;
-      } else {
-        Serial.println("✗ Formato inválido. Intenta de nuevo:");
-      }
-    }
-    delay(100);
-  }
+  // Verificar huella
+  Serial.println("\n→ Verificando identidad biométrica...");
+  
+  JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
 
-  if (hora_ingresada.length() != 8) {
-    Serial.println("✗ Timeout o hora inválida");
+  if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
+    Serial.println("✗ Error obteniendo datos del usuario");
     return;
   }
 
-  Serial.print("✓ Hora: ");
-  Serial.println(hora_ingresada);
+  int sensor_id = datos_usuario["sensor_id"];
 
-  // ★ PASO 4: VERIFICAR SESIÓN ABIERTA
-  Serial.println("\n→ Verificando sesión...");
+  if (sensor_id == -1) {
+    Serial.println("✗ El usuario no tiene huella registrada");
+    return;
+  }
+
+  if (!searchFingerprintInSensorWithID(sensor_id)) {
+    Serial.println("✗ Verificación biométrica fallida");
+    return;
+  }
+
+  Serial.println("✓ Identidad verificada\n");
+
+  // Registrar entrada
+  Serial.println("→ Registrando asistencia...");
   
-  WiFiClient cliente;
+  // ★ OBTENER FECHA Y HORA AUTOMÁTICAMENTE
+  String fecha_hora_actual = obtenerFechaHoraActual();
+  String fecha_str = fecha_hora_actual.substring(0, 10);  // YYYY-MM-DD
+  String hora_str = fecha_hora_actual.substring(11, 19);  // HH:MM:SS
   
-  if (!cliente.connect(BACKEND_IP, BACKEND_PORT)) {
+  JsonDocument respuesta = registrarAsistenciaDocente(
+    num_doc_usuario.c_str(),
+    horario_id.c_str(),
+    fecha_str.c_str(),
+    hora_str.c_str(),
+    aula.c_str()
+  );
+
+  if (respuesta.containsKey("error")) {
     Serial.println("✗ Error conectando al servidor");
     return;
   }
 
-  JsonDocument solicitud;
-  solicitud["horario_id"] = horario_id;
-  solicitud["fecha"] = fecha_ingresada;
+  bool exito = respuesta["exito"];
+  String mensaje = respuesta["mensaje"].as<String>();
 
-  String payload;
-  serializeJson(solicitud, payload);
-
-  String request = String("POST /hardware/sesiones/verificar HTTP/1.1\r\n");
-  request += String("Host: ") + BACKEND_IP + ":" + BACKEND_PORT + "\r\n";
-  request += "Content-Type: application/json\r\n";
-  request += "Content-Length: " + String(payload.length()) + "\r\n";
-  request += "Connection: close\r\n";
-  request += "\r\n";
-  request += payload;
-
-  cliente.print(request);
-  delay(1500);
-
-  String respuesta_str = "";
-  unsigned long timeout_resp = millis();
-  
-  while (millis() - timeout_resp < 5000) {
-    while (cliente.available()) {
-      respuesta_str += (char)cliente.read();
-      delay(5);
-    }
-    delay(50);
-  }
-  cliente.stop();
-
-  JsonDocument verificacion;
-  int json_inicio = respuesta_str.indexOf("{");
-  if (json_inicio != -1) {
-    String json_str = respuesta_str.substring(json_inicio);
-    deserializeJson(verificacion, json_str);
-  }
-
-  bool hay_sesion = verificacion["hay_sesion_abierta"];
-
-  if (!hay_sesion) {
-    Serial.println("✗ No hay sesión abierta para este horario en esta fecha");
-    return;
-  }
-
-  String sesion_id = verificacion["sesion_id"].as<String>();
-  Serial.println("✓ Sesión disponible");
-
-  // ★ PASO 5: VERIFICAR TIPO DE REGISTRO (entrada o salida)
-  Serial.println("\n→ Determinando tipo de registro...");
-  
-  JsonDocument tipo_resp = verificarTipoRegistro(sesion_id.c_str(), num_doc.c_str());
-
-  if (tipo_resp.containsKey("error")) {
-    Serial.println("✗ Error verificando tipo de registro");
-    return;
-  }
-
-  bool puede_entrada = tipo_resp["puede_entrada"];
-  bool puede_salida = tipo_resp["puede_salida"];
-  bool completado = tipo_resp.containsKey("completado") && tipo_resp["completado"];
-
-  String tipo = "";
-
-  if (completado) {
-    Serial.println("✗ Ya completaste entrada y salida en esta sesión");
-    return;
-  }
-
-  if (puede_entrada && !puede_salida) {
-    tipo = "entrada";
-    Serial.println("✓ Registrando ENTRADA");
-  } else if (puede_salida && !puede_entrada) {
-    tipo = "salida";
-    Serial.println("✓ Registrando SALIDA");
+  if (exito) {
+    Serial.print("✓ ");
+    Serial.println(mensaje);
   } else {
-    Serial.println("✗ Error: No se pudo determinar el tipo de registro");
+    String error_msg = respuesta["detail"].as<String>();
+    Serial.print("✗ Error: ");
+    Serial.println(error_msg);
+  }
+}
+
+void procesarAsistenciaEstudiante(String num_doc, String fecha) {
+  Serial.println("\n[ESTUDIANTE - ASISTENCIA]\n");
+
+  // ★ PASO 1: OBTENER SESIONES ABIERTAS EN ESTA FECHA
+  Serial.println("→ Buscando sesiones abiertas...");
+  
+  JsonDocument sesiones_resp = obtenerSesionesAbiertasPorFecha(fecha.c_str());
+
+  if (sesiones_resp.containsKey("error")) {
+    Serial.println("✗ Error conectando al servidor");
     return;
   }
 
-  // ★ PASO 6: DETERMINAR MÉTODO DE REGISTRO
-  String metodo_verificacion = "";
+  bool hay_sesiones = sesiones_resp["hay_sesiones"];
+
+  if (!hay_sesiones) {
+    Serial.println("✗ No hay sesiones abiertas disponibles");
+    return;
+  }
+
+  JsonArray sesiones = sesiones_resp["sesiones"].as<JsonArray>();
+
+  Serial.print("✓ Encontradas ");
+  Serial.print(sesiones.size());
+  Serial.println(" sesión(es) abierta(s)\n");
+
+  // ★ PASO 2: FILTRAR SESIONES PARA LAS QUE EL ESTUDIANTE ESTÁ MATRICULADO
+  Serial.println("→ Verificando matrículas...");
+
+  // Crear documento para almacenar sesiones válidas
+  JsonDocument doc_sesiones_validas;
+  JsonArray sesiones_validas = doc_sesiones_validas.to<JsonArray>();
+
+  for (size_t i = 0; i < sesiones.size(); i++) {
+    String horario_id = sesiones[i]["horario_id"].as<String>();
+    
+    Serial.print("[DEBUG] Procesando sesion ");
+    Serial.print(i + 1);
+    Serial.print(" con horario_id: ");
+    Serial.println(horario_id);
+    
+    // Obtener asignatura_id y grupo del horario
+    JsonDocument horario_datos = obtenerDatosHorario(horario_id.c_str());
+
+    if (!horario_datos["existe"]) {
+      Serial.println("[DEBUG] Horario no encontrado");
+      continue;
+    }
+
+    String asignatura_id = horario_datos["asignatura_id"].as<String>();
+    String grupo = horario_datos["grupo"].as<String>();
+
+    Serial.print("[DEBUG] Asignatura: ");
+    Serial.print(asignatura_id);
+    Serial.print(", Grupo: ");
+    Serial.println(grupo);
+
+    // Verificar si estudiante está matriculado
+    JsonDocument matricula_resp = verificarMatriculaEstudiante(num_doc.c_str(), asignatura_id.c_str(), grupo.c_str());
+
+    Serial.print("[DEBUG] Matriculado: ");
+    Serial.println(matricula_resp["matriculado"] ? "true" : "false");
+
+    if (matricula_resp["matriculado"]) {
+      // Crear nuevo objeto para agregar a array
+      JsonObject sesion_valida = sesiones_validas.add<JsonObject>();
+      sesion_valida["sesion_id"] = sesiones[i]["sesion_id"].as<String>();
+      sesion_valida["horario_id"] = horario_id;
+      sesion_valida["asignatura_id"] = asignatura_id;
+      sesion_valida["grupo"] = grupo;
+      sesion_valida["aula"] = sesiones[i]["aula"].as<String>();
+      sesion_valida["created_at"] = sesiones[i]["created_at"].as<String>();
+      
+      Serial.println("[DEBUG] Sesion agregada a sesiones_validas");
+    }
+  }
+
+  if (sesiones_validas.size() == 0) {
+    Serial.println("✗ No hay sesiones abiertas disponibles");
+    return;
+  }
+
+  Serial.print("✓ Tienes acceso a ");
+  Serial.print(sesiones_validas.size());
+  Serial.println(" sesión(es)\n");
+
+  // Obtener datos de la(s) sesión(es) válida(s) para mostrar
+  // NOTA: Por ahora solo mostramos los datos que ya tenemos sin hacer llamadas HTTP adicionales
+  // para optimizar tiempo. Si necesitas más detalles, descomentar las llamadas.
   
-  // Si es SALIDA, obtener método de entrada de la BD
-  if (tipo == "salida") {
-    Serial.print("[DEBUG] sesion_id: ");
-    Serial.println(sesion_id);
+  for (size_t i = 0; i < sesiones_validas.size(); i++) {
+    String asignatura_id = sesiones_validas[i]["asignatura_id"].as<String>();
+    String grupo = sesiones_validas[i]["grupo"].as<String>();
     
-    JsonDocument metodo_entrada_resp = obtenerMetodoEntrada(num_doc.c_str(), sesion_id.c_str());
+    // Obtener nombre de asignatura SOLO UNA VEZ
+    JsonDocument asignatura_datos = obtenerDatosAsignatura(asignatura_id.c_str());
     
-    Serial.print("[DEBUG] encontrado: ");
-    Serial.println(metodo_entrada_resp.containsKey("encontrado") ? "true" : "false");
+    if (asignatura_datos["existe"]) {
+      String nombre_asignatura = asignatura_datos["nombre"].as<String>();
+      String codigo_asignatura = asignatura_datos["codigo"].as<String>();
+      
+      Serial.print("→ Sesión ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(nombre_asignatura);
+      Serial.print(" (");
+      Serial.print(codigo_asignatura);
+      Serial.print(") - Grupo ");
+      Serial.println(grupo);
+    }
+  }
+
+  // ★ OBTENER FECHA Y HORA AUTOMÁTICA
+  String fecha_hora = obtenerFechaHoraActual();
+  String fecha_str = fecha_hora.substring(0, 10); // YYYY-MM-DD
+  String hora_str = fecha_hora.substring(11, 19);  // HH:MM:SS
+  
+  Serial.println("\n→ Fecha y hora actual obtenidas automáticamente");
+  Serial.print("   Fecha: ");
+  Serial.println(fecha_str);
+  Serial.print("   Hora: ");
+  Serial.println(hora_str);
+
+  // ★ PASO 4: PROCESAR CADA SESIÓN VÁLIDA
+  // Si hay una única sesión, procesarla directamente
+  // Si hay múltiples, procesar la más antigua para salida, o crear entrada
+
+  if (sesiones_validas.size() == 1) {
+    String sesion_id = sesiones_validas[0]["sesion_id"].as<String>();
+    String horario_id = sesiones_validas[0]["horario_id"].as<String>();
+    String aula = sesiones_validas[0]["aula"].as<String>();
+    String asignatura_id = sesiones_validas[0]["asignatura_id"].as<String>();
+    String grupo = sesiones_validas[0]["grupo"].as<String>();
+
+    procesarRegistroEstudiante(num_doc, sesion_id, horario_id, aula, fecha, hora_str, asignatura_id, grupo);
+  } else {
+    // Múltiples sesiones: procesar la más antigua para salida
+    // o crear entrada si ninguna tiene registro previo
+
+    String sesion_mas_antigua = sesiones_validas[0]["sesion_id"].as<String>();
+    String created_at_mas_antigua = sesiones_validas[0]["created_at"].as<String>();
+    int indice_mas_antigua = 0;
+
+    for (size_t i = 1; i < sesiones_validas.size(); i++) {
+      String created_at = sesiones_validas[i]["created_at"].as<String>();
+      if (created_at < created_at_mas_antigua) {
+        sesion_mas_antigua = sesiones_validas[i]["sesion_id"].as<String>();
+        created_at_mas_antigua = created_at;
+        indice_mas_antigua = i;
+      }
+    }
+
+    String horario_id = sesiones_validas[indice_mas_antigua]["horario_id"].as<String>();
+    String aula = sesiones_validas[indice_mas_antigua]["aula"].as<String>();
+    String asignatura_id = sesiones_validas[indice_mas_antigua]["asignatura_id"].as<String>();
+    String grupo = sesiones_validas[indice_mas_antigua]["grupo"].as<String>();
+
+    // Imprimir información de la sesión más antigua (para salida)
+    JsonDocument horario_completo = obtenerHorarioCompleto(horario_id.c_str());
     
-    if (metodo_entrada_resp.containsKey("encontrado") && metodo_entrada_resp["encontrado"]) {
-      String metodo_usado = metodo_entrada_resp["metodo_entrada"].as<String>();
+    if (horario_completo["existe"]) {
+      String hora_inicio = horario_completo["hora_inicio"].as<String>();
+      String hora_fin = horario_completo["hora_fin"].as<String>();
       
-      Serial.print("[DEBUG] metodo_entrada: ");
-      Serial.println(metodo_usado);
+      // Obtener nombre de asignatura
+      JsonDocument asignatura_datos = obtenerDatosAsignatura(asignatura_id.c_str());
       
-      if (metodo_usado == "Supervisado") {
-      String metodo_usado = metodo_entrada_resp["metodo_entrada"].as<String>();
+      if (asignatura_datos["existe"]) {
+        String nombre_asignatura = asignatura_datos["nombre"].as<String>();
+        String codigo_asignatura = asignatura_datos["codigo"].as<String>();
+        
+        Serial.print("→ Sesión: ");
+        Serial.print(nombre_asignatura);
+        Serial.print(" (");
+        Serial.print(codigo_asignatura);
+        Serial.print(") - Grupo ");
+        Serial.print(grupo);
+        Serial.print(" - ");
+        Serial.print(hora_inicio);
+        Serial.print(" a ");
+        Serial.println(hora_fin);
+      }
+    }
+
+    Serial.println();
+    procesarRegistroEstudiante(num_doc, sesion_mas_antigua, horario_id, aula, fecha, hora_str, asignatura_id, grupo);
+  }
+}
+
+
+void procesarRegistroEstudiante(String num_doc, String sesion_id, String horario_id, String aula, String fecha, String hora, String asignatura_id, String grupo) {
+  // ★ PASO 1: VERIFICAR SI TIENE REGISTRO PREVIO
+  JsonDocument asistencia_resp = obtenerAsistenciaEstudiantePorSesion(num_doc.c_str(), sesion_id.c_str());
+
+  String tipo_registro = "";
+  String metodo_verificacion = "";
+
+  if (asistencia_resp["existe"]) {
+    // Tiene registro previo en estado "inasistencia" → SALIDA
+    tipo_registro = "salida";
+    metodo_verificacion = asistencia_resp["metodo_verificacion"].as<String>();
+
+    Serial.println("\n→ Registro previo encontrado. Registrando SALIDA.");
+    
+    // Obtener datos del horario para mostrar información de la sesión
+    JsonDocument horario_completo = obtenerHorarioCompleto(horario_id.c_str());
+    
+    if (horario_completo["existe"]) {
+      String hora_inicio = horario_completo["hora_inicio"].as<String>();
+      String hora_fin = horario_completo["hora_fin"].as<String>();
       
-      if (metodo_usado == "Supervisado") {
-        // Entrada fue supervisada, usar automáticamente supervisado
+      // Obtener nombre de asignatura
+      JsonDocument asignatura_datos = obtenerDatosAsignatura(asignatura_id.c_str());
+      
+      if (asignatura_datos["existe"]) {
+        String nombre_asignatura = asignatura_datos["nombre"].as<String>();
+        String codigo_asignatura = asignatura_datos["codigo"].as<String>();
+        
+        Serial.print("   Sesión: ");
+        Serial.print(nombre_asignatura);
+        Serial.print(" (");
+        Serial.print(codigo_asignatura);
+        Serial.print(") - Grupo ");
+        Serial.print(grupo);
+        Serial.print(" - ");
+        Serial.print(hora_inicio);
+        Serial.print(" a ");
+        Serial.println(hora_fin);
+      }
+    }
+    
+    Serial.print("   Método de entrada: ");
+    Serial.println(metodo_verificacion);
+
+    // Si entrada fue supervisada, salida es automáticamente supervisada
+    if (metodo_verificacion == "Supervisado") {
+      // Obtener docente y pedir confirmación
+      JsonDocument docente_resp = obtenerDocenteSesion(sesion_id.c_str());
+
+      if (!docente_resp["existe"]) {
+        Serial.println("✗ Error obteniendo datos del docente");
+        return;
+      }
+
+      String nombre_docente = docente_resp["nombre_docente"].as<String>();
+      
+      Serial.print("\n→ ");
+      Serial.print(nombre_docente);
+      Serial.println(", ¿confirmas que el estudiante es quien dice ser?");
+      Serial.println("(El registro de asistencia quedará bajo tu responsabilidad)\n");
+      Serial.println("1 -> Confirmar");
+      Serial.println("2 -> Cancelar\n");
+
+      // Limpiar buffer
+      while (Serial.available()) {
+        Serial.read();
+      }
+      delay(200);
+
+      unsigned long timeout_conf = millis();
+      char confirmacion_char = '0';
+
+      while (millis() - timeout_conf < 15000 && confirmacion_char == '0') {
+        if (Serial.available()) {
+          confirmacion_char = Serial.read();
+        }
+        delay(100);
+      }
+
+      if (confirmacion_char != '1') {
+        Serial.println("✗ Registro cancelado por el docente");
+        return;
+      }
+
+      Serial.println("✓ Confirmado por docente\n");
+    } else {
+      // Entrada fue biométrica, permitir elegir método para salida
+      Serial.println("\n→ Selecciona método de registro:\n");
+      Serial.println("1 -> Biométrico (Huella dactilar)");
+      Serial.println("2 -> Supervisado (Por docente)\n");
+
+      // Limpiar buffer
+      while (Serial.available()) {
+        Serial.read();
+      }
+      delay(200);
+
+      unsigned long timeout = millis();
+      char metodo_char = '0';
+
+      while (millis() - timeout < 15000 && metodo_char == '0') {
+        if (Serial.available()) {
+          metodo_char = Serial.read();
+        }
+        delay(100);
+      }
+
+      if (metodo_char == '1') {
+        metodo_verificacion = "Biometría";
+        Serial.println("→ Método: Biométrico\n");
+        
+        // Verificar huella
+      Serial.println("→ Verificando identidad biométrica...");
+      
+      JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
+
+      if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
+        Serial.println("✗ Error obteniendo datos del usuario");
+        return;
+      }
+
+      int sensor_id = datos_usuario["sensor_id"];
+
+      if (sensor_id == -1) {
+        Serial.println("✗ El usuario no tiene huella registrada");
+        return;
+      }
+
+      bool permitir_supervisado_entrada = false;
+      int resultado_entrada = searchFingerprintWithRetries(sensor_id, permitir_supervisado_entrada);
+
+      if (resultado_entrada == -1 && permitir_supervisado_entrada) {
+        // Falló biometría 3 veces - ofrecer supervisado
+        Serial.println("\n✗ La huella no corresponde al usuario o hay un problema en su verificación.");
+        Serial.println("¿Desea hacer un registro supervisado?\n");
+        Serial.println("1 -> Sí");
+        Serial.println("2 -> No\n");
+
+        // Limpiar buffer
+        while (Serial.available()) {
+          Serial.read();
+        }
+        delay(200);
+
+        unsigned long timeout_sup = millis();
+        char opcion_sup = '0';
+
+        while (millis() - timeout_sup < 15000 && opcion_sup == '0') {
+          if (Serial.available()) {
+            opcion_sup = Serial.read();
+          }
+          delay(100);
+        }
+
+        if (opcion_sup == '1') {
+          metodo_verificacion = "Supervisado";
+          
+          // Obtener docente y pedir confirmación
+          JsonDocument docente_resp = obtenerDocenteSesion(sesion_id.c_str());
+
+          if (!docente_resp["existe"]) {
+            Serial.println("✗ Error obteniendo datos del docente");
+            return;
+          }
+
+          String nombre_docente = docente_resp["nombre_docente"].as<String>();
+          
+          Serial.print("→ ");
+          Serial.print(nombre_docente);
+          Serial.println(", ¿confirmas que el estudiante es quien dice ser?");
+          Serial.println("(El registro de asistencia quedará bajo tu responsabilidad)\n");
+          Serial.println("1 -> Confirmar");
+          Serial.println("2 -> Cancelar\n");
+
+          // Limpiar buffer
+          while (Serial.available()) {
+            Serial.read();
+          }
+          delay(200);
+
+          unsigned long timeout_conf = millis();
+          char confirmacion_char = '0';
+
+          while (millis() - timeout_conf < 15000 && confirmacion_char == '0') {
+            if (Serial.available()) {
+              confirmacion_char = Serial.read();
+            }
+            delay(100);
+          }
+
+          if (confirmacion_char != '1') {
+            Serial.println("✗ Registro cancelado por el docente");
+            return;
+          }
+
+          Serial.println("✓ Confirmado por docente\n");
+        } else {
+          Serial.println("✗ Registro cancelado");
+          return;
+        }
+      } else if (resultado_entrada == -1) {
+        Serial.println("✗ Verificación biométrica fallida");
+        return;
+      } else {
+        Serial.println("✓ Identidad verificada\n");
+      }
+
+      } else if (metodo_char == '2') {
         metodo_verificacion = "Supervisado";
+        Serial.println("→ Método: Supervisado\n");
         
         // Obtener docente y pedir confirmación
         JsonDocument docente_resp = obtenerDocenteSesion(sesion_id.c_str());
@@ -1209,7 +1460,7 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
 
         String nombre_docente = docente_resp["nombre_docente"].as<String>();
         
-        Serial.print("\n→ ");
+        Serial.print("→ ");
         Serial.print(nombre_docente);
         Serial.println(", ¿confirmas que el estudiante es quien dice ser?");
         Serial.println("(El registro de asistencia quedará bajo tu responsabilidad)\n");
@@ -1238,148 +1489,125 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
         }
 
         Serial.println("✓ Confirmado por docente\n");
-        
-        // Saltar directo a registro de asistencia
-        Serial.println("→ Registrando asistencia...");
-        
-        JsonDocument respuesta = registrarAsistenciaEstudianteConMetodo(
-          num_doc.c_str(),
-          horario_id.c_str(),
-          fecha_ingresada.c_str(),
-          hora_ingresada.c_str(),
-          tipo.c_str(),
-          metodo_verificacion.c_str()
-        );
 
-        if (respuesta.containsKey("error")) {
-          Serial.println("✗ Error conectando al servidor");
-          return;
-        }
-
-        bool exito = respuesta["exito"];
-        String mensaje = respuesta["mensaje"].as<String>();
-
-        if (exito) {
-          Serial.print("✓ ");
-          Serial.println(mensaje);
-        } else {
-          String error_msg = respuesta["detail"].as<String>();
-          Serial.print("✗ ");
-          Serial.println(error_msg);
-        }
-        
-        return;  // Terminar función aquí
+      } else {
+        Serial.println("✗ Opción inválida");
+        return;
       }
     }
-  }
-
-  // Si entrada fue biométrica O es entrada, mostrar menú de métodos
-  // Limpiar buffer serial
-  while (Serial.available()) {
-    Serial.read();
-  }
-  delay(200);
-  
-  Serial.println("\n→ Selecciona método de registro:\n");
-  Serial.println("1 -> Biométrico (Huella dactilar)");
-  Serial.println("2 -> Supervisado (Por docente)\n");
-
-  unsigned long timeout_metodo = millis();
-  char metodo_char = '0';
-
-  while (millis() - timeout_metodo < 15000 && metodo_char == '0') {
-    if (Serial.available()) {
-      metodo_char = Serial.read();
-    }
-    delay(100);
-  }
-
-  if (metodo_char == '1') {
-    metodo_verificacion = "Biometría";
-    Serial.println("→ Método: Biométrico\n");
-    
-    // ★ VERIFICAR HUELLA BIOMÉTRICA
-    Serial.println("→ Verificando identidad biométrica...");
-    
-    JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
-
-    if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
-      Serial.println("✗ Error obteniendo datos del usuario");
-      return;
-    }
-
-    int sensor_id = datos_usuario["sensor_id"];
-
-    if (sensor_id == -1) {
-      Serial.println("✗ El usuario no tiene huella registrada");
-      return;
-    }
-
-    if (!searchFingerprintInSensorWithID(sensor_id)) {
-      Serial.println("✗ Verificación biométrica fallida");
-      return;
-    }
-
-    Serial.println("✓ Identidad verificada\n");
-
-  } else if (metodo_char == '2') {
-    metodo_verificacion = "Supervisado";
-    Serial.println("→ Método: Supervisado\n");
-    
-    // ★ OBTENER DOCENTE Y PEDIR CONFIRMACIÓN
-    JsonDocument docente_resp = obtenerDocenteSesion(sesion_id.c_str());
-
-    if (!docente_resp["existe"]) {
-      Serial.println("✗ Error obteniendo datos del docente");
-      return;
-    }
-
-    String nombre_docente = docente_resp["nombre_docente"].as<String>();
-    
-    Serial.print("→ ");
-    Serial.print(nombre_docente);
-    Serial.println(", ¿confirmas que el estudiante es quien dice ser?");
-    Serial.println("(El registro de asistencia quedará bajo tu responsabilidad)\n");
-    Serial.println("1 -> Confirmar");
-        Serial.println("2 -> Cancelar\n");
-
-        // Limpiar buffer
-        while (Serial.available()) {
-          Serial.read();
-        }
-        delay(200);
-
-        unsigned long timeout_conf = millis();
-        char confirmacion_char = '0';
-
-        while (millis() - timeout_conf < 15000 && confirmacion_char == '0') {
-          if (Serial.available()) {
-            confirmacion_char = Serial.read();
-          }
-          delay(100);
-        }
-
-    if (confirmacion_char != '1') {
-      Serial.println("✗ Registro cancelado por el docente");
-      return;
-    }
-
-    Serial.println("✓ Confirmado por docente\n");
-
   } else {
-    Serial.println("✗ Opción inválida");
-    return;
+    // No tiene registro → ENTRADA
+    tipo_registro = "entrada";
+
+    Serial.println("\n→ Registrando ENTRADA.");
+
+    // Limpiar buffer
+    while (Serial.available()) {
+      Serial.read();
+    }
+    delay(200);
+
+    Serial.println("\n→ Selecciona método de registro:\n");
+    Serial.println("1 -> Biométrico (Huella dactilar)");
+    Serial.println("2 -> Supervisado (Por docente)\n");
+
+    unsigned long timeout = millis();
+    char metodo_char = '0';
+
+    while (millis() - timeout < 15000 && metodo_char == '0') {
+      if (Serial.available()) {
+        metodo_char = Serial.read();
+      }
+      delay(100);
+    }
+
+    if (metodo_char == '1') {
+      metodo_verificacion = "Biometría";
+      Serial.println("→ Método: Biométrico\n");
+      
+      // Verificar huella
+      Serial.println("→ Verificando identidad biométrica...");
+      
+      JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
+
+      if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
+        Serial.println("✗ Error obteniendo datos del usuario");
+        return;
+      }
+
+      int sensor_id = datos_usuario["sensor_id"];
+
+      if (sensor_id == -1) {
+        Serial.println("✗ El usuario no tiene huella registrada");
+        return;
+      }
+
+      if (!searchFingerprintInSensorWithID(sensor_id)) {
+        Serial.println("✗ Verificación biométrica fallida");
+        return;
+      }
+
+      Serial.println("✓ Identidad verificada\n");
+
+    } else if (metodo_char == '2') {
+      metodo_verificacion = "Supervisado";
+      Serial.println("→ Método: Supervisado\n");
+      
+      // Obtener docente y pedir confirmación
+      JsonDocument docente_resp = obtenerDocenteSesion(sesion_id.c_str());
+
+      if (!docente_resp["existe"]) {
+        Serial.println("✗ Error obteniendo datos del docente");
+        return;
+      }
+
+      String nombre_docente = docente_resp["nombre_docente"].as<String>();
+      
+      Serial.print("→ ");
+      Serial.print(nombre_docente);
+      Serial.println(", ¿confirmas que el estudiante es quien dice ser?");
+      Serial.println("(El registro de asistencia quedará bajo tu responsabilidad)\n");
+      Serial.println("1 -> Confirmar");
+      Serial.println("2 -> Cancelar\n");
+
+      // Limpiar buffer
+      while (Serial.available()) {
+        Serial.read();
+      }
+      delay(200);
+
+      unsigned long timeout_conf = millis();
+      char confirmacion_char = '0';
+
+      while (millis() - timeout_conf < 15000 && confirmacion_char == '0') {
+        if (Serial.available()) {
+          confirmacion_char = Serial.read();
+        }
+        delay(100);
+      }
+
+      if (confirmacion_char != '1') {
+        Serial.println("✗ Registro cancelado por el docente");
+        return;
+      }
+
+      Serial.println("✓ Confirmado por docente\n");
+
+    } else {
+      Serial.println("✗ Opción inválida");
+      return;
+    }
   }
 
-  // ★ PASO 7: REGISTRAR ASISTENCIA
+  // ★ PASO FINAL: REGISTRAR ASISTENCIA
   Serial.println("→ Registrando asistencia...");
   
   JsonDocument respuesta = registrarAsistenciaEstudianteConMetodo(
     num_doc.c_str(),
     horario_id.c_str(),
-    fecha_ingresada.c_str(),
-    hora_ingresada.c_str(),
-    tipo.c_str(),
+    fecha.c_str(),
+    hora.c_str(),
+    tipo_registro.c_str(),
     metodo_verificacion.c_str()
   );
 
@@ -1399,4 +1627,41 @@ void procesarAsistenciaEstudiante(String num_doc, String horario_id, String fech
     Serial.print("✗ ");
     Serial.println(error_msg);
   }
+}
+
+
+bool verificarPinAdmin() {
+  Serial.println("\n[VERIFICACIÓN DE ADMINISTRADOR]\n");
+  Serial.println("Ingresa PIN de administrativo:");
+  
+  String pin = "";
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 30000) {
+    if (Serial.available()) {
+      pin = Serial.readStringUntil('\n');
+      pin.trim();
+      
+      if (pin.length() > 0) {
+        break;
+      }
+    }
+    delay(100);
+  }
+  
+  if (pin.length() == 0) {
+    Serial.println("✗ Timeout");
+    return false;
+  }
+  
+  Serial.println("→ Verificando PIN...");
+  JsonDocument verificacion = verificarPinAdmin(pin.c_str());
+  
+  if (!verificacion["valido"]) {
+    Serial.println("✗ PIN incorrecto");
+    return false;
+  }
+  
+  Serial.println("✓ Autenticado como administrador\n");
+  return true;
 }

@@ -273,6 +273,40 @@ bool searchFingerprintInSensorWithID(uint16_t sensor_id) {
   return false;
 }
 
+int searchFingerprintWithRetries(uint16_t sensor_id, bool &permitir_supervisado) {
+  permitir_supervisado = false;
+  int intentos = 0;
+  const int MAX_INTENTOS = 3;
+
+  while (intentos < MAX_INTENTOS) {
+    intentos++;
+    Serial.print("→ Intento ");
+    Serial.print(intentos);
+    Serial.print("/");
+    Serial.println(MAX_INTENTOS);
+    Serial.println("→ Coloca el dedo en el sensor...");
+    
+    if (searchFingerprintInSensorWithID(sensor_id)) {
+      int id = getFingerprintID();
+      int confianza = getFingerprintConfidence();
+      Serial.print("✓ ¡Huella coincide! | Confianza: ");
+      Serial.println(confianza);
+      return id;
+    }
+    
+    Serial.println("✗ Huella no reconocida");
+    
+    if (intentos < MAX_INTENTOS) {
+      delay(1000);
+    }
+  }
+
+  // Si llegamos aquí, los 3 intentos fallaron
+  permitir_supervisado = true;
+  Serial.println("\n✗ No se pudo verificar la huella después de 3 intentos");
+  return -1;
+}
+
 // =====================================================
 // OBTENER ID
 // =====================================================

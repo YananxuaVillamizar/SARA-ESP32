@@ -26,6 +26,7 @@ bool searchFingerprintInSensorWithID(uint16_t sensor_id);
 int getFingerprintID();
 int getFingerprintConfidence();
 bool clearDatabase();
+int searchFingerprintWithRetries(uint16_t sensor_id, bool &permitir_supervisado);
 
 
 #endif // BIOMETRIC_SENSOR_H
