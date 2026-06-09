@@ -174,6 +174,56 @@ bool enrollFingerprintWithID(uint16_t id) {
 // =====================================================
 // BUSCAR HUELLA EN SENSOR (VERIFICACIÓN 1:1)
 // =====================================================
+bool searchFingerprintOnce(uint16_t sensor_id) {
+  Serial.println("→ Procesando huella...");
+
+  int p = FINGERPRINT_NOFINGER;
+  unsigned long start = millis();
+
+  while (millis() - start < 10000) {
+    p = finger.getImage();
+
+    if (p == FINGERPRINT_OK) {
+      break;
+    }
+
+    delay(100);
+  }
+
+  if (p != FINGERPRINT_OK) {
+    Serial.println("✗ No se detectó dedo");
+    return false;
+  }
+
+  if (finger.image2Tz() != FINGERPRINT_OK) {
+    Serial.println("✗ Error procesando huella");
+    return false;
+  }
+
+  Serial.println("→ Comparando con huella almacenada...");
+  
+  int p_search = finger.fingerFastSearch();
+
+  if (p_search == FINGERPRINT_OK) {
+    int found_id = finger.fingerID;
+    
+    if (found_id == sensor_id) {
+      lastFingerprintID = sensor_id;
+      lastFingerprintConfidence = finger.confidence;
+      return true;
+    } else {
+      Serial.print("✗ Huella encontrada pero ID no coincide. Encontrado: ");
+      Serial.print(found_id);
+      Serial.print(" | Esperado: ");
+      Serial.println(sensor_id);
+      return false;
+    }
+  } else {
+    Serial.println("✗ Huella no encontrada en este intento");
+    return false;
+  }
+}
+
 bool searchFingerprintInSensorWithID(uint16_t sensor_id) {
   Serial.print("\n[BUSCAR HUELLA - ID: ");
   Serial.print(sensor_id);
@@ -286,18 +336,16 @@ int searchFingerprintWithRetries(uint16_t sensor_id, bool &permitir_supervisado)
     Serial.println(MAX_INTENTOS);
     Serial.println("→ Coloca el dedo en el sensor...");
     
-    if (searchFingerprintInSensorWithID(sensor_id)) {
+    // ★ LLAMAR A LA FUNCIÓN SIN REINTENTOS INTERNOS
+    if (searchFingerprintOnce(sensor_id)) {
       int id = getFingerprintID();
-      int confianza = getFingerprintConfidence();
-      Serial.print("✓ ¡Huella coincide! | Confianza: ");
-      Serial.println(confianza);
       return id;
     }
     
-    Serial.println("✗ Huella no reconocida");
+    Serial.println(); // Una sola línea vacía entre intentos
     
     if (intentos < MAX_INTENTOS) {
-      delay(1000);
+      delay(2000);
     }
   }
 
@@ -306,7 +354,6 @@ int searchFingerprintWithRetries(uint16_t sensor_id, bool &permitir_supervisado)
   Serial.println("\n✗ No se pudo verificar la huella después de 3 intentos");
   return -1;
 }
-
 // =====================================================
 // OBTENER ID
 // =====================================================
@@ -348,5 +395,38 @@ bool clearDatabase() {
   }
 
   Serial.println("✗ No se pudo eliminar la base.");
+  return false;
+}
+
+bool deleteFingerprintById(uint16_t id) {
+  // ★ BORRAR UNA SOLA HUELLA POR ID
+  int attempts = 0;
+  uint8_t result;
+
+  Serial.print("→ Borrando huella con ID: ");
+  Serial.println(id);
+
+  while (attempts < 5) {
+    result = finger.deleteModel(id);
+
+    if (result == FINGERPRINT_OK) {
+      Serial.print("✓ Huella ");
+      Serial.print(id);
+      Serial.println(" eliminada correctamente.");
+      delay(800);
+      return true;
+    }
+
+    Serial.print("[Intento ");
+    Serial.print(attempts + 1);
+    Serial.print("/5] Error eliminando huella. Código: ");
+    Serial.println(result);
+
+    attempts++;
+    delay(1000);
+  }
+
+  Serial.print("✗ No se pudo eliminar la huella ");
+  Serial.println(id);
   return false;
 }
