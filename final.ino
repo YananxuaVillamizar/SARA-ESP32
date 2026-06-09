@@ -350,9 +350,7 @@ void flujoVerificacion() {
     // Aquí irá registro de asistencia en el futuro
     Serial.println("✓ Asistencia registrada");
       
-  } else {
-    Serial.println("\n✗ Huella no reconocida");
-  }
+  } 
 
   num_doc_usuario = "";
   nombre_usuario = "";
@@ -718,6 +716,45 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     Serial.println(asignaturas[opcion_asignatura]["hora_inicio"].as<String>());
   }
 
+  // ★ OBTENER HORA ACTUAL Y VALIDAR ANTES DE PEDIR AULA
+  String fecha_hora_actual = obtenerFechaHoraActual();
+  String hora_fin = asignaturas[opcion_asignatura]["hora_fin"].as<String>();
+  String hora_actual = fecha_hora_actual.substring(11, 19);  // HH:MM:SS
+  
+  // Comparar horas (formato HH:MM:SS)
+  if (hora_actual > hora_fin) {
+    Serial.println("\n✗ El horario ordinario para esta sesión ha finalizado.");
+    Serial.println("✓ Pero puedes realizar esta clase como sesión extraordinaria.\n");
+    
+    Serial.println("¿Deseas continuar como sesión extraordinaria?");
+    Serial.println("1 -> Sí");
+    Serial.println("2 -> No\n");
+
+    while (Serial.available()) {
+      Serial.read();
+    }
+    delay(200);
+
+    unsigned long timeout = millis();
+    char opcion_extraordinaria = '0';
+
+    while (millis() - timeout < 15000 && opcion_extraordinaria == '0') {
+      if (Serial.available()) {
+        opcion_extraordinaria = Serial.read();
+      }
+      delay(100);
+    }
+
+    if (opcion_extraordinaria == '1') {
+      // ★ CAMBIAR A SESIÓN EXTRAORDINARIA
+      procesarSesionExtraordinaria(num_doc, fecha);
+      return;
+    } else {
+      Serial.println("✗ Registro cancelado");
+      return;
+    }
+  }
+
   String horario_id = asignaturas[opcion_asignatura]["horario_id"].as<String>();
   String aula = asignaturas[opcion_asignatura]["aula"].as<String>();
 
@@ -795,7 +832,6 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     int resultado = searchFingerprintWithRetries(sensor_id, permitir_pin);
 
     if (resultado == -1 && permitir_pin) {
-      Serial.println("\n✗ La huella no se verificó");
       Serial.println("¿Deseas usar PIN en su lugar?\n");
       Serial.println("1 -> Sí");
       Serial.println("2 -> No\n");
@@ -910,7 +946,7 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     return;
   }
 
-  String fecha_hora_actual = obtenerFechaHoraActual();
+  // ★ fecha_hora_actual ya fue obtenida antes
   String fecha_str = fecha_hora_actual.substring(0, 10);
   String hora_str = fecha_hora_actual.substring(11, 19);
   
@@ -1032,12 +1068,18 @@ void procesarSesionExtraordinaria(String num_doc, String fecha) {
 
   for (size_t i = 0; i < horarios.size(); i++) {
     Serial.print(i + 1);
-    Serial.print(". Grupo ");
-    Serial.print(horarios[i]["grupo"].as<String>());
+    Serial.print(". ");
+    
+    // ★ MOSTRAR DÍA Y HORARIO (sin grupo, ya se seleccionó)
+    String dia_semana_horario = horarios[i]["dia_semana"].as<String>();
+    String hora_inicio = horarios[i]["hora_inicio"].as<String>();
+    String hora_fin = horarios[i]["hora_fin"].as<String>();
+    
+    Serial.print(dia_semana_horario);
     Serial.print(" - ");
-    Serial.print(horarios[i]["hora_inicio"].as<String>());
+    Serial.print(hora_inicio);
     Serial.print(" a ");
-    Serial.println(horarios[i]["hora_fin"].as<String>());
+    Serial.println(hora_fin);
   }
 
   while (Serial.available()) {
@@ -1155,7 +1197,6 @@ void procesarSesionExtraordinaria(String num_doc, String fecha) {
     int resultado = searchFingerprintWithRetries(sensor_id, permitir_pin);
 
     if (resultado == -1 && permitir_pin) {
-      Serial.println("\n✗ La huella no se verificó");
       Serial.println("¿Deseas usar PIN en su lugar?\n");
       Serial.println("1 -> Sí");
       Serial.println("2 -> No\n");
@@ -1462,7 +1503,6 @@ String procesarRegistroEstudianteEntrada(String num_doc, String sesion_id, Strin
     int resultado = searchFingerprintWithRetries(sensor_id, permitir_supervisado);
 
     if (resultado == -1 && permitir_supervisado) {
-      Serial.println("\n✗ La huella no se verificó");
       Serial.println("¿Deseas registrar supervisado?\n");
       Serial.println("1 -> Sí");
       Serial.println("2 -> No\n");
@@ -1818,7 +1858,6 @@ void procesarRegistroEstudianteSalida(String num_doc, String sesion_id, String h
       int resultado = searchFingerprintWithRetries(sensor_id, permitir_supervisado);
 
       if (resultado == -1 && permitir_supervisado) {
-        Serial.println("\n✗ La huella no se verificó");
         Serial.println("¿Deseas hacer un registro supervisado?\n");
         Serial.println("1 -> Sí");
         Serial.println("2 -> No\n");
