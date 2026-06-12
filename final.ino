@@ -1,8 +1,20 @@
 #include "biometric_sensor.h"
 #include "wifi_backend.h"
+#include "display.h"
+
 
 unsigned long ultimo_sync = 0;
 const unsigned long SYNC_INTERVAL = 30000;  // 30 segundos
+
+void logPrint(String msg){
+  Serial.print(msg);
+  Display.print(msg);
+}
+
+void logPrintln(String msg){
+  Serial.println(msg);
+  Display.println(msg);
+}
 
 String obtenerDiaSemana(String fecha_str) {
   // fecha_str formato: YYYY-MM-DD
@@ -48,9 +60,15 @@ String usuario_id = "";
 
 void setup() {
   Serial.begin(115200);
+  Display.begin();
+  Display.println("Display iniciado");
   delay(1000);
 
-  Serial.println("\n=== SARA - SISTEMA BIOMÉTRICO ===\n");
+  Display.println("Prueba 1");
+Display.println("Prueba 2");
+Display.println("Prueba 3");
+
+  logPrintln("\n=== SARA - SISTEMA BIOMÉTRICO ===\n");
 
   if (!initFingerprintSensor()) {
     Serial.println("FATAL: Sensor no detectado");
@@ -63,7 +81,7 @@ void setup() {
   }
 
   // ★ SINCRONIZAR HORA CON NTP
-  Serial.println("\n[BOOT] Sincronizando hora con servidor NTP...");
+  logPrintln("\n[BOOT] Sincronizando hora con servidor NTP...");
   
   // Configurar zona horaria (Colombia es UTC-5)
   configTime(-5 * 3600, 0, "pool.ntp.org", "time.nist.gov");
@@ -85,7 +103,7 @@ void setup() {
     Serial.println("[WARN] No se pudo sincronizar la hora");
   }
 
-  Serial.println("\n✓ Sistema listo\n");
+  Serial.print("\n✓ Sistema listo\n");
   mostrarMenuPrincipal();
 }
 
