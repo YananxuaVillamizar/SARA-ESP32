@@ -42,6 +42,10 @@ class DisplayManager {
 
     XPT2046_Touchscreen ts = XPT2046_Touchscreen(14, 13);
 
+    bool touching = false;
+
+    int lastTouchY = 0;
+
 };
 
 extern DisplayManager Display;

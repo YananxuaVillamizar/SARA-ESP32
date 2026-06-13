@@ -15,7 +15,7 @@ void DisplayManager::begin() {
   ts.begin();
 
   tft.setRotation(3);
-  
+
   clear();
 
 }
@@ -79,22 +79,7 @@ void DisplayManager::redraw() {
   tft.println("SARA");
 
   tft.drawLine(0,45,480,45,TFT_WHITE);
-  // Panel lateral
-
-  tft.fillRect(0,46,40,274,TFT_DARKGREY);
-
-  // Botón subir
-
-  tft.drawRect(2,60,36,50,TFT_WHITE);
-  tft.setCursor(13,75);
-  tft.print("^");
-
-  // Botón bajar
-
-  tft.drawRect(2,130,36,50,TFT_WHITE);
-  tft.setCursor(13,145);
-  tft.print("v");
-
+  
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
 
@@ -125,7 +110,7 @@ void DisplayManager::redraw() {
 
   for(int i = start; i < end; i++) {
 
-    tft.setCursor(40, y);
+    tft.setCursor(10, y);
     tft.println(lines[i]);
 
     y += 35;
@@ -202,22 +187,15 @@ void DisplayManager::update() {
 
 void DisplayManager::handleTouch() {
 
-  if(!ts.touched())
+  if(!ts.touched()) {
+
+    touching = false;
+
     return;
 
-  TS_Point p = ts.getPoint();
+  }
 
-  int x = constrain(
-    map(
-      p.x,
-      276,
-      3787,
-      0,
-      480
-    ),
-    0,
-    479
-  );
+  TS_Point p = ts.getPoint();
 
   int y = constrain(
     map(
@@ -231,46 +209,23 @@ void DisplayManager::handleTouch() {
     319
   );
 
-  delay(120);
+  if(!touching) {
 
-  Serial.print("X=");
-  Serial.print(x);
-  Serial.print(" Y=");
-  Serial.println(y);
+    touching = true;
 
-
-  // Botón subir
-
-  if(
-    x >= 0 &&
-    x <= 40 &&
-    y >= 60 &&
-    y <= 110
-  ){
-
-    autoFollow = false;
-
-    firstVisibleLine -= 3;
-
-    if(firstVisibleLine < 0)
-      firstVisibleLine = 0;
-
-    redraw();
+    lastTouchY = y;
 
     return;
 
   }
 
-  // Botón bajar
+  int deltaY = y - lastTouchY;
 
-  if(
-    x >= 0 &&
-    x <= 40 &&
-    y >= 130 &&
-    y <= 180
-  ){
+  if(abs(deltaY) > 15) {
 
-    firstVisibleLine += 3;
+    autoFollow = false;
+
+    firstVisibleLine -= deltaY / 15;
 
     int maxStart =
       max(
@@ -278,13 +233,14 @@ void DisplayManager::handleTouch() {
         totalLines - 7
       );
 
+    if(firstVisibleLine < 0)
+      firstVisibleLine = 0;
+
     if(firstVisibleLine > maxStart)
       firstVisibleLine = maxStart;
 
     redraw();
 
-    return;
-
+    lastTouchY = y;
   }
-
 }
