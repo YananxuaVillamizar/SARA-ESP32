@@ -1,4 +1,5 @@
 #include "wifi_backend.h"
+#include "display.h"
 // ★ PARA CONEXIONES HTTPS
 #include <WiFiClientSecure.h>
 
@@ -43,7 +44,7 @@ JsonDocument realizarPeticionHTTPS(const char* host, const char* endpoint, const
   client.setInsecure();
   
   if (!client.connect(host, 443)) {
-    Serial.println("[ERROR] No se pudo conectar a " + String(host));
+    logPrintln("[ERROR] No se pudo conectar a " + String(host));
     respuesta["error"] = true;
     return respuesta;
   }
@@ -83,8 +84,8 @@ JsonDocument realizarPeticionHTTPS(const char* host, const char* endpoint, const
 }
 
 bool conectarWiFi() {
-  Serial.print("Conectando a WiFi: ");
-  Serial.println(WIFI_SSID);
+  logPrint("Conectando a WiFi: ");
+  logPrintln(WIFI_SSID);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -92,18 +93,18 @@ bool conectarWiFi() {
   int intentos = 0;
   while (WiFi.status() != WL_CONNECTED && intentos < 20) {
     delay(500);
-    Serial.print(".");
+    logPrint(".");
     intentos++;
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("\n✗ Error conectando a WiFi.");
+    logPrintln("\n✗ Error conectando a WiFi.");
     return false;
   }
 
-  Serial.println("\n✓ WiFi conectado!");
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
+  logPrintln("\n✓ WiFi conectado!");
+  logPrint("IP: ");
+  logPrintln(WiFi.localIP().toString());
 
   return true;
 }
@@ -129,7 +130,7 @@ JsonDocument obtenerDatosUsuario(const char* num_doc) {
 }
 
 bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id) {
-  Serial.println("[DEBUG] Enviando notificación al servidor...");
+  logPrintln("[DEBUG] Enviando notificación al servidor...");
 
   JsonDocument solicitud;
   solicitud["num_doc"] = num_doc;
@@ -143,10 +144,10 @@ bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id) {
   bool success = respuesta.containsKey("exito") && respuesta["exito"];
 
   if (success) {
-    Serial.println("[DEBUG] ✓ Respuesta exitosa del servidor");
+    logPrintln("[DEBUG] ✓ Respuesta exitosa del servidor");
     return true;
   } else {
-    Serial.println("[DEBUG] ✗ No se recibió confirmación");
+    logPrintln("[DEBUG] ✗ No se recibió confirmación");
     return !respuesta.containsKey("error");
   }
 }
@@ -338,7 +339,7 @@ JsonDocument obtenerIdDisponible() {
   client.setInsecure();
   
   if (!client.connect(BACKEND_HOST, 443)) {
-    Serial.println("[ERROR] No se pudo conectar al backend");
+    logPrintln("[ERROR] No se pudo conectar al backend");
     respuesta["disponible"] = false;
     return respuesta;
   }
@@ -366,7 +367,7 @@ JsonDocument obtenerIdDisponible() {
   client.stop();
 
   if (respuesta_str.length() == 0) {
-    Serial.println("[ERROR] No se recibió respuesta");
+    logPrintln("[ERROR] No se recibió respuesta");
     respuesta["disponible"] = false;
     return respuesta;
   }
@@ -421,7 +422,7 @@ JsonDocument obtenerComandosPendientes() {
     String json_str = respuesta_str.substring(json_inicio);
     DeserializationError error = deserializeJson(respuesta, json_str);
     if (error) {
-      Serial.println("[ERROR] Error al parsear comandos JSON");
+      logPrintln("[ERROR] Error al parsear comandos JSON");
       respuesta["error"] = true;
     }
   } else {
