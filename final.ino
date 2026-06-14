@@ -1,6 +1,7 @@
 #include "biometric_sensor.h"
 #include "wifi_backend.h"
 #include "display.h"
+#include "keyboard.h"
 
 
 unsigned long ultimo_sync = 0;
@@ -51,6 +52,8 @@ String usuario_id = "";
 void setup() {
   Serial.begin(115200);
   Display.begin();
+  Keyboard.begin(); 
+  Keyboard.setDisplay(&Display);
   Display.println("Display iniciado");
   delay(1000);
 
@@ -83,7 +86,7 @@ void setup() {
   
   if (ahora > 24 * 3600) {
     struct tm timeinfo = *localtime(&ahora);
-    logPrint("[OK] Hora sincronizada: ");
+    logPrintln("[OK] Hora sincronizada: ");
     logPrintln(asctime(&timeinfo));
   } else {
     logPrintln("[WARN] No se pudo sincronizar la hora");
@@ -95,6 +98,7 @@ void setup() {
 
 void loop() {
 
+  Keyboard.update();
   Display.update();
 
   if (Serial.available()) {
@@ -224,7 +228,7 @@ void procesarDocumento(String documento, String tipo_flujo) {
 }
 
 void flujoRegistro() {
-  logPrint("\n[REGISTRO]\n");
+  logPrintln("\n[REGISTRO]\n");
   logPrint("Usuario: ");
   logPrintln(nombre_usuario);
   logPrint("Documento: ");
@@ -302,7 +306,7 @@ void flujoRegistro() {
 }
 
 void flujoVerificacion() {
-  logPrint("\n[VERIFICACIÓN]\n");
+  logPrintln("\n[VERIFICACIÓN]\n");
   logPrint("Usuario: ");
   logPrintln(nombre_usuario);
   logPrint("Documento: ");
@@ -2461,7 +2465,7 @@ void verificarComandosPendientes() {
     return;
   }
 
-  logPrint("[SYNC] Encontrados ");
+  logPrintln("[SYNC] Encontrados ");
   logPrint(comandos.size());
   logPrintln(" comando(s)");
 
@@ -2473,7 +2477,7 @@ void verificarComandosPendientes() {
     int huella_id = comando["huella_id"];
     String cmd = comando["comando"].as<String>();
 
-    logPrint("[SYNC] Procesando comando ");
+    logPrintln("[SYNC] Procesando comando ");
     logPrint(comando_id);
     logPrint(": ");
     logPrintln(cmd);

@@ -36,6 +36,11 @@ class DisplayManager {
 
     void update();
 
+    friend class KeyboardManager;  // ★ Permitir acceso a Keyboard
+
+    // ★ Para mostrar input del keyboard en header
+    void mostrarInputKeyboard(String texto);
+
   private:
 
     TFT_eSPI tft = TFT_eSPI();

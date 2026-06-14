@@ -72,7 +72,7 @@ uint16_t DisplayManager::detectarColor(String texto) {
     return COLOR_NORMAL;
   }
 
-  // ★ ERROR - Rojo (ANTES de TÍTULOS)
+  // ★ ERROR - Rojo (debe estar ANTES)
   if (textoBajo.indexOf("[error]") != -1 ||
       textoBajo.indexOf("error") != -1 || 
       textoBajo.indexOf("fallo") != -1 ||
@@ -80,7 +80,7 @@ uint16_t DisplayManager::detectarColor(String texto) {
     return COLOR_ERROR;
   }
 
-  // ★ ÉXITO - Verde (ANTES de TÍTULOS)
+  // ★ ÉXITO - Verde
   if (textoBajo.indexOf("[ok]") != -1 ||
       textoBajo.indexOf("correctamente") != -1 ||
       textoBajo.indexOf("conectado") != -1 ||
@@ -97,15 +97,15 @@ uint16_t DisplayManager::detectarColor(String texto) {
     return COLOR_WARNING;
   }
 
-  // ★ INPUT/ENTRADA - Amarillo (muy restrictivo)
+  // ★ INPUT/ENTRADA - Amarillo (solo si pregunta explícita)
   if ((textoBajo.indexOf("ingresa") != -1 && textoBajo.length() > 20) || 
       (textoBajo.indexOf("selecciona") != -1 && textoBajo.length() > 20) ||
       (textoBajo.indexOf("escribe") != -1 && textoBajo.length() > 20)) {
     return COLOR_INPUT;
   }
 
-  // ★ TÍTULOS Y SECCIONES - Cyan (DESPUÉS de todo lo demás)
-  if (texto.indexOf("[") != -1 && texto.indexOf("]") != -1 &&
+  // ★ TÍTULOS Y SECCIONES - Cyan (SOLO si comienza con [ y termina con ])
+  if (texto[0] == '[' && texto[texto.length() - 1] == ']' &&
       textoBajo.indexOf("[ok]") == -1 &&
       textoBajo.indexOf("[error]") == -1) {
     return COLOR_INFO;
@@ -186,7 +186,7 @@ void DisplayManager::redraw() {
 
 void DisplayManager::addLine(String text) {
 
-  // ★ Si es línea vacía, agregar un espacio NO vacío para mantener espaciado
+  // ★ Si es línea vacía, agregar un espacio
   if (text.length() == 0) {
     text = " ";
   }
@@ -197,45 +197,41 @@ void DisplayManager::addLine(String text) {
   // ★ Detectar color según contenido
   uint16_t color = detectarColor(text);
 
+  // ★ NUEVO: Wrapping carácter por carácter para mayor precisión
   String linea = "";
 
-  while (text.length() > 0) {
+  for (int i = 0; i < text.length(); i++) {
+    char c = text[i];
+    String temp = linea + c;
 
-    int espacio = text.indexOf(' ');
-    String palabra;
+    // Si el carácter no cabe, guardar línea actual y comenzar nueva
+    if (tft.textWidth(temp) > 455) {
 
-    if (espacio == -1) {
-      palabra = text;
-      text = "";
-    } else {
-      palabra = text.substring(0, espacio + 1);
-      text = text.substring(espacio + 1);
-    }
-
-    // ★ AUMENTADO a 480 para menos wrapping
-    if (tft.textWidth(linea + palabra) > 480) {
-
-      if (totalLines < MAX_LINES) {
-        lines[totalLines].texto = linea;
-        lines[totalLines].color = color;
-        totalLines++;
-      } else {
-        for (int i = 0; i < MAX_LINES - 1; i++) {
-          lines[i] = lines[i + 1];
+      if (linea.length() > 0) {
+        if (totalLines < MAX_LINES) {
+          lines[totalLines].texto = linea;
+          lines[totalLines].color = color;
+          totalLines++;
+        } else {
+          for (int j = 0; j < MAX_LINES - 1; j++) {
+            lines[j] = lines[j + 1];
+          }
+          lines[MAX_LINES - 1].texto = linea;
+          lines[MAX_LINES - 1].color = color;
         }
-        lines[MAX_LINES - 1].texto = linea;
-        lines[MAX_LINES - 1].color = color;
       }
 
-      linea = palabra;
+      linea = "";
+      linea += c;  // Comenzar nueva línea con este carácter
 
     } else {
 
-      linea += palabra;
+      linea += c;
 
     }
   }
 
+  // Guardar última línea
   if (linea.length() > 0) {
 
     if (totalLines < MAX_LINES) {
@@ -243,8 +239,8 @@ void DisplayManager::addLine(String text) {
       lines[totalLines].color = color;
       totalLines++;
     } else {
-      for (int i = 0; i < MAX_LINES - 1; i++) {
-        lines[i] = lines[i + 1];
+      for (int j = 0; j < MAX_LINES - 1; j++) {
+        lines[j] = lines[j + 1];
       }
       lines[MAX_LINES - 1].texto = linea;
       lines[MAX_LINES - 1].color = color;
@@ -312,5 +308,21 @@ void DisplayManager::handleTouch() {
     lastTouchY = y;
 
   }
+
+}
+
+void DisplayManager::mostrarInputKeyboard(String texto) {
+
+  // Limpiar área del input (al lado de SARA)
+  tft.fillRect(120, 10, 350, 30, COLOR_FONDO);
+
+  // Dibujar el input
+  tft.setTextColor(COLOR_INPUT, COLOR_FONDO);
+  tft.setTextSize(2);
+  tft.setCursor(130, 15);
+
+  tft.print("Input: ");
+  tft.print(texto);
+  tft.print("_");  // Cursor
 
 }
