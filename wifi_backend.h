@@ -21,8 +21,9 @@ JsonDocument obtenerDatosUsuario(const char* num_doc);
 bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id);
 
 JsonDocument registrarAsistenciaDocente(const char* num_doc, const char* horario_id,
-                                        const char* fecha, const char* hora, const char* aula, const char* tipo_sesion);
-                                        
+                                        const char* fecha, const char* hora, const char* aula, 
+                                        const char* tipo_sesion, const char* metodo_verificacion);
+                                                                               
 JsonDocument verificarTipoRegistro(const char* sesion_id, const char* num_doc);
 JsonDocument obtenerDocenteSesion(const char* sesion_id);
 JsonDocument registrarAsistenciaEstudianteConMetodo(const char* num_doc, const char* horario_id,
@@ -42,6 +43,8 @@ JsonDocument obtenerMetodoEntradaParaSalida(const char* num_doc, const char* ses
 JsonDocument verificarPinDocente(const char* num_doc, const char* pin);
 JsonDocument obtenerUsuarioDocentePorSesion(const char* sesion_id);
 JsonDocument obtenerIdDisponible();
+JsonDocument obtenerMetodoEntradaDocentePorSesion(const char* sesion_id, const char* num_doc);
+JsonDocument validarSesionDisponible(const char* horario_id, const char* fecha, const char* num_doc);
 
 // ★ FUNCIÓN AUXILIAR HTTPS (declarada en .cpp)
 JsonDocument realizarPeticionHTTPS(const char* host, const char* endpoint, const String& payload);

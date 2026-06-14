@@ -485,6 +485,7 @@ void procesarAsistenciaDocente(String num_doc, String fecha) {
   String sesion_id = "";
   String horario_id = "";
   String aula = "";
+  char metodo_char = '0';  // ★ NUEVA: declarar aquí para usarla después
 
   // ★ PASO 1: VERIFICAR SI HAY SESIONES ABIERTAS
   logPrintln("→ Verificando sesiones abiertas...");
@@ -524,56 +525,289 @@ void procesarAsistenciaDocente(String num_doc, String fecha) {
     logPrint(" a ");
     logPrintln(hora_fin);
   
-
     // ★ OBTENER FECHA Y HORA AUTOMÁTICA
-  String fecha_hora = obtenerFechaHoraActual();
-  String fecha_str = fecha_hora.substring(0, 10); // YYYY-MM-DD
-  String hora_str = fecha_hora.substring(11, 19);  // HH:MM:SS
-  
-  logPrintln("\n→ Fecha y hora actual obtenidas automáticamente");
-  logPrint("   Fecha: ");
-  logPrintln(fecha_str);
-  logPrint("   Hora: ");
-  logPrintln(hora_str);
-
-
-    // Verificar huella
-    logPrintln("\n→ Verificando identidad biométrica...");
+    String fecha_hora = obtenerFechaHoraActual();
+    String fecha_str = fecha_hora.substring(0, 10); // YYYY-MM-DD
+    String hora_str = fecha_hora.substring(11, 19);  // HH:MM:SS
     
-    JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
+    logPrintln("\n→ Fecha y hora actual obtenidas automáticamente");
+    logPrint("   Fecha: ");
+    logPrintln(fecha_str);
+    logPrint("   Hora: ");
+    logPrintln(hora_str);
 
-    if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
-      logPrintln("✗ Error obteniendo datos del usuario");
+    // ★ OBTENER MÉTODO DE ENTRADA DESDE LA BD
+    logPrintln("\n→ Obteniendo método de entrada usado...");
+    JsonDocument metodo_resp = obtenerMetodoEntradaDocentePorSesion(sesion_id.c_str(), num_doc.c_str());
+
+    String metodo_entrada = "";
+    if (metodo_resp["existe"]) {
+      metodo_entrada = metodo_resp["metodo_verificacion"].as<String>();
+      logPrint("✓ Método de entrada detectado: ");
+      logPrintln(metodo_entrada);
+    } else {
+      logPrintln("✗ No se pudo obtener el método de entrada");
       return;
     }
 
-    int sensor_id = datos_usuario["sensor_id"];
+    logPrintln("\n[REGISTRO DE SALIDA]\n");
 
-    if (sensor_id == -1) {
-      logPrintln("✗ El usuario no tiene huella registrada");
-      return;
+    // ★ MOSTRAR MENÚ BASADO EN MÉTODO DE ENTRADA
+    if (metodo_entrada == "Biometría") {
+      // Si entrada fue biometría, mostrar menú de opciones
+      logPrintln("¿Cómo deseas registrar tu salida?");
+      logPrintln("1 -> Biometría (huella)");
+      logPrintln("2 -> PIN docente\n");
+
+      while (Serial.available()) {
+        Serial.read();
+      }
+      delay(200);
+
+      unsigned long timeout = millis();
+      metodo_char = '0';  // ★ REINICIAR la variable
+
+      while (millis() - timeout < 15000 && metodo_char == '0') {
+        if (Serial.available()) {
+          metodo_char = Serial.read();
+        }
+        delay(100);
+      }
+
+      JsonDocument datos_usuario = obtenerDatosUsuario(num_doc.c_str());
+
+      if (!datos_usuario.containsKey("existe") || !datos_usuario["existe"]) {
+        logPrintln("✗ Error obteniendo datos del usuario");
+        return;
+      }
+
+      int sensor_id = datos_usuario["sensor_id"];
+
+      if (metodo_char == '1') {
+        // SALIDA CON BIOMETRÍA
+        if (sensor_id == -1) {
+          logPrintln("✗ El usuario no tiene huella registrada");
+          return;
+        }
+
+        logPrintln();
+        
+        bool permitir_pin = false;
+        int resultado = searchFingerprintWithRetries(sensor_id, permitir_pin);
+
+        if (resultado == -1 && permitir_pin) {
+          logPrintln("¿Desea hacer registro con PIN?\n");
+          logPrintln("1 -> Sí");
+          logPrintln("2 -> No\n");
+
+          while (Serial.available()) {
+            Serial.read();
+          }
+          delay(200);
+
+          timeout = millis();
+          char opcion_pin = '0';
+
+          while (millis() - timeout < 15000 && opcion_pin == '0') {
+            if (Serial.available()) {
+              opcion_pin = Serial.read();
+            }
+            delay(100);
+          }
+
+          if (opcion_pin == '1') {
+            metodo_char = '2';
+          } else {
+            logPrintln("✗ Salida cancelada");
+            return;
+          }
+        } else if (resultado == -1) {
+          logPrintln("✗ Verificación biométrica fallida");
+          return;
+        } else {
+          int confianza = getFingerprintConfidence();
+          logPrint("✓ ¡Huella coincide! | Confianza: ");
+          logPrintln(confianza);
+          logPrintln("✓ Identidad verificada\n");
+        }
+      }
+
+      if (metodo_char == '2') {
+        // SALIDA CON PIN
+        logPrintln();
+        
+        while (Serial.available()) {
+          Serial.read();
+        }
+        delay(300);
+        
+        // ★ 2 INTENTOS DE PIN
+        int intentos_pin = 0;
+        const int MAX_INTENTOS_PIN = 2;
+        bool pin_valido_salida = false;
+
+        while (intentos_pin < MAX_INTENTOS_PIN && !pin_valido_salida) {
+          intentos_pin++;
+          logPrint("Intento ");
+          logPrint(intentos_pin);
+          logPrint("/");
+          logPrintln(MAX_INTENTOS_PIN);
+          logPrintln("Ingresa tu PIN (4 dígitos):");
+          
+          String pin = "";
+          timeout = millis();
+          bool pin_completo = false;
+
+          while (millis() - timeout < 30000 && !pin_completo) {
+            if (Serial.available()) {
+              char c = Serial.read();
+              
+              if (c == '\n') {
+                if (pin.length() == 4) {
+                  pin_completo = true;
+                  break;
+                } else if (pin.length() > 0) {
+                  logPrint("✗ PIN inválido (debe ser 4 dígitos, ingresaste ");
+                  logPrint(pin.length());
+                  logPrintln("):");
+                  pin = "";
+                }
+              } else if (c >= '0' && c <= '9') {
+                pin += c;
+                logPrint("*");
+              }
+            }
+            delay(50);
+          }
+
+          if (pin.length() != 4) {
+            logPrintln("\n✗ Timeout");
+            return;
+          }
+
+          logPrintln();
+          logPrintln("→ Verificando PIN...");
+          JsonDocument verificacion = verificarPinDocente(num_doc.c_str(), pin.c_str());
+
+          if (!verificacion["valido"]) {
+            logPrintln("✗ PIN incorrecto");
+            if (intentos_pin < MAX_INTENTOS_PIN) {
+              logPrintln();
+            }
+          } else {
+            logPrintln("✓ PIN verificado correctamente\n");
+            pin_valido_salida = true;
+          }
+        }
+
+        if (!pin_valido_salida) {
+          logPrintln("✗ Se agotaron los intentos de PIN");
+          return;
+        }
+      } else if (metodo_char != '1') {
+        logPrintln("✗ Opción inválida");
+        return;
+      }
+
+    } else if (metodo_entrada == "PIN docente") {
+      // Si entrada fue PIN, salida SOLO con PIN (sin menú)
+      logPrintln("Entrada registrada con PIN. Registrando salida con PIN.\n");
+
+      while (Serial.available()) {
+        Serial.read();
+      }
+      delay(300);
+      
+      metodo_char = '2';  // ★ ESTABLECER como PIN
+      
+      // ★ 2 INTENTOS DE PIN
+      int intentos_pin = 0;
+      const int MAX_INTENTOS_PIN = 2;
+      bool pin_valido_salida = false;
+
+      while (intentos_pin < MAX_INTENTOS_PIN && !pin_valido_salida) {
+        intentos_pin++;
+        logPrint("Intento ");
+        logPrint(intentos_pin);
+        logPrint("/");
+        logPrintln(MAX_INTENTOS_PIN);
+        logPrintln("Ingresa tu PIN (4 dígitos):");
+        
+        String pin = "";
+        unsigned long timeout = millis();
+        bool pin_completo = false;
+
+        while (millis() - timeout < 30000 && !pin_completo) {
+          if (Serial.available()) {
+            char c = Serial.read();
+            
+            if (c == '\n') {
+              if (pin.length() == 4) {
+                pin_completo = true;
+                break;
+              } else if (pin.length() > 0) {
+                logPrint("✗ PIN inválido (debe ser 4 dígitos, ingresaste ");
+                logPrint(pin.length());
+                logPrintln("):");
+                pin = "";
+              }
+            } else if (c >= '0' && c <= '9') {
+              pin += c;
+              logPrint("*");
+            }
+          }
+          delay(50);
+        }
+
+        if (pin.length() != 4) {
+          logPrintln("\n✗ Timeout");
+          return;
+        }
+
+        logPrintln();
+        logPrintln("→ Verificando PIN...");
+        JsonDocument verificacion = verificarPinDocente(num_doc.c_str(), pin.c_str());
+
+        if (!verificacion["valido"]) {
+          logPrintln("✗ PIN incorrecto");
+          if (intentos_pin < MAX_INTENTOS_PIN) {
+            logPrintln();
+          }
+        } else {
+          logPrintln("✓ PIN verificado correctamente\n");
+          pin_valido_salida = true;
+        }
+      }
+
+      if (!pin_valido_salida) {
+        logPrintln("✗ Se agotaron los intentos de PIN");
+        return;
+      }
     }
 
-    if (!searchFingerprintInSensorWithID(sensor_id)) {
-      logPrintln("✗ Verificación biométrica fallida");
-      return;
+    // ★ REGISTRAR SALIDA
+    // ★ DETERMINAR MÉTODO USADO EN SALIDA
+    // El método de salida se determina según lo que el usuario eligió, no según la entrada
+    String metodo_salida = "";
+    
+    if (metodo_entrada == "Biometría") {
+      // Si entrada fue biometría, el usuario eligió menú y se guardó en metodo_char
+      metodo_salida = (metodo_char == '1') ? "Biometría" : "PIN docente";
+    } else if (metodo_entrada == "PIN docente") {
+      // Si entrada fue PIN docente, salida siempre es PIN docente
+      metodo_salida = "PIN docente";
     }
-
-    logPrintln("✓ Identidad verificada\n");
-
-    // Registrar salida
+    
     logPrintln("→ Registrando asistencia...");
     
-    horario_id = sesiones_resp["horario_id"].as<String>();
-    String aula = sesiones_resp["aula"].as<String>();
-
     JsonDocument respuesta = registrarAsistenciaDocente(
       num_doc.c_str(),
       horario_id.c_str(),
       fecha.c_str(),
       hora_str.c_str(),
       aula.c_str(),
-      ""  // Para salida, el tipo ya está registrado en la sesión
+      "",
+      metodo_salida.c_str()  // ★ Enviar el método de salida (puede diferir de entrada)
     );
 
     if (respuesta.containsKey("error")) {
@@ -723,12 +957,27 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     logPrintln(asignaturas[opcion_asignatura]["hora_inicio"].as<String>());
   }
 
-  // ★ OBTENER HORA ACTUAL Y VALIDAR ANTES DE PEDIR AULA
+  // ★ OBTENER DATOS NECESARIOS PARA VALIDACIÓN
+  String horario_id = asignaturas[opcion_asignatura]["horario_id"].as<String>();
   String fecha_hora_actual = obtenerFechaHoraActual();
+  String fecha_str = fecha_hora_actual.substring(0, 10);
   String hora_fin = asignaturas[opcion_asignatura]["hora_fin"].as<String>();
-  String hora_actual = fecha_hora_actual.substring(11, 19);  // HH:MM:SS
+  String hora_actual = fecha_hora_actual.substring(11, 19);
+
+  // ★ VALIDAR QUE NO EXISTA SESIÓN COMPLETADA/ABIERTA CON MISMO HORARIO
+  logPrintln("\n→ Validando disponibilidad...");
   
-  // Comparar horas (formato HH:MM:SS)
+  JsonDocument validacion = validarSesionDisponible(horario_id.c_str(), fecha_str.c_str(), num_doc.c_str());
+  
+  if (!validacion["disponible"]) {
+    String razon = validacion["razon"].as<String>();
+    logPrintln(razon);
+    return;
+  }
+  
+  logPrintln("✓ Sesión disponible\n");
+
+  // ★ VALIDAR QUE NO HAYA PASADO LA HORA DE FIN DE LA CLASE
   if (hora_actual > hora_fin) {
     logPrintln("\n✗ El horario ordinario para esta sesión ha finalizado.");
     logPrintln("✓ Pero puedes realizar esta clase como sesión extraordinaria.\n");
@@ -762,7 +1011,6 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     }
   }
 
-  String horario_id = asignaturas[opcion_asignatura]["horario_id"].as<String>();
   String aula = asignaturas[opcion_asignatura]["aula"].as<String>();
 
   logPrintln("\nIngresa el aula donde se realizará la clase (ej: A101):");
@@ -839,7 +1087,7 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     int resultado = searchFingerprintWithRetries(sensor_id, permitir_pin);
 
     if (resultado == -1 && permitir_pin) {
-      logPrintln("¿Deseas usar PIN en su lugar?\n");
+      logPrintln("\n¿Desea hacer registro con PIN?\n");
       logPrintln("1 -> Sí");
       logPrintln("2 -> No\n");
 
@@ -940,7 +1188,7 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
       } else {
         logPrintln("✓ PIN verificado correctamente\n");
         pin_valido_entrada = true;
-        metodo_entrada = "PIN";
+        metodo_entrada = "PIN docente";
       }
     }
 
@@ -953,8 +1201,7 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     return;
   }
 
-  // ★ fecha_hora_actual ya fue obtenida antes
-  String fecha_str = fecha_hora_actual.substring(0, 10);
+  // ★ fecha_str y fecha_hora_actual ya fueron obtenidas antes
   String hora_str = fecha_hora_actual.substring(11, 19);
   
   logPrintln("→ Registrando asistencia...");
@@ -965,7 +1212,8 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
     fecha_str.c_str(),
     hora_str.c_str(),
     aula_ingresada.c_str(),
-    "ordinaria"
+    "ordinaria",
+    metodo_entrada.c_str()
   );
 
   if (respuesta.containsKey("error")) {
@@ -979,9 +1227,6 @@ void procesarSesionOrdinaria(String num_doc, String fecha) {
   if (exito) {
     logPrint("✓ ");
     logPrintln(mensaje);
-    
-    // ★ GUARDAR SESIÓN Y MÉTODO PARA SALIDA POSTERIOR
-    // (Estos serían variables globales que se usan en procesarAsistenciaDocente cuando hay sesión abierta)
   } else {
     String error_msg = respuesta["detail"].as<String>();
     logPrint("✗ Error: ");
@@ -1204,7 +1449,7 @@ void procesarSesionExtraordinaria(String num_doc, String fecha) {
     int resultado = searchFingerprintWithRetries(sensor_id, permitir_pin);
 
     if (resultado == -1 && permitir_pin) {
-      logPrintln("¿Deseas usar PIN en su lugar?\n");
+      logPrintln("\n¿Desea hacer registro con PIN?\n");
       logPrintln("1 -> Sí");
       logPrintln("2 -> No\n");
 
@@ -1305,7 +1550,7 @@ void procesarSesionExtraordinaria(String num_doc, String fecha) {
       } else {
         logPrintln("✓ PIN verificado correctamente\n");
         pin_valido_entrada = true;
-        metodo_entrada = "PIN";
+        metodo_entrada = "PIN docente";
       }
     }
 
@@ -1330,7 +1575,8 @@ void procesarSesionExtraordinaria(String num_doc, String fecha) {
     fecha_str.c_str(),
     hora_str.c_str(),
     aula_ingresada.c_str(),
-    "extraordinaria"
+    "extraordinaria",
+    metodo_entrada.c_str()  // ★ NUEVO: pasar el método usado en entrada
   );
 
   if (respuesta.containsKey("error")) {
@@ -1353,6 +1599,25 @@ void procesarSesionExtraordinaria(String num_doc, String fecha) {
 
 void procesarAsistenciaEstudiante(String num_doc, String fecha, String hora) {
   logPrintln("\n[ESTUDIANTE - ASISTENCIA]\n");
+
+  // ★ PASO 0: VERIFICAR SI HAY SESIÓN ABIERTA PARA SALIDA (PRIORITARIA)
+  logPrintln("→ Verificando si hay sesiones pendientes de salida...");
+  JsonDocument sesion_salida = obtenerSesionParaSalida(num_doc.c_str());
+
+  if (sesion_salida["encontrada"]) {
+    logPrint("✓ Sesión encontrada con entrada pendiente de salida: ");
+    logPrint(sesion_salida["asignatura_nombre"].as<String>());
+    logPrint(" - Grupo ");
+    logPrintln(sesion_salida["grupo"].as<String>());
+    logPrintln();
+
+    String sesion_id = sesion_salida["sesion_id"].as<String>();
+    String horario_id = sesion_salida["horario_id"].as<String>();
+
+    // ★ REGISTRAR SALIDA SIN MÉTODO PREVIO
+    procesarRegistroEstudianteSalida(num_doc, sesion_id, horario_id, fecha, hora);
+    return;
+  }
 
   // ★ PASO 1: BUSCAR SESIONES DISPONIBLES PARA ENTRADA
   logPrintln("→ Buscando sesiones disponibles para entrada...");
@@ -1441,28 +1706,8 @@ void procesarAsistenciaEstudiante(String num_doc, String fecha, String hora) {
     return;
   }
 
-  // ★ PASO 2: SI NO HAY PARA ENTRADA, BUSCAR PARA SALIDA
-  logPrintln("✗ No hay sesiones disponibles para entrada");
-  logPrintln("\n→ Buscando sesiones abiertas para salida...");
-
-  JsonDocument sesion_salida = obtenerSesionParaSalida(num_doc.c_str());
-
-  if (sesion_salida["encontrada"]) {
-    logPrint("✓ Sesión encontrada para salida: ");
-    logPrint(sesion_salida["asignatura_nombre"].as<String>());
-    logPrint(" - Grupo ");
-    logPrintln(sesion_salida["grupo"].as<String>());
-    logPrintln();
-
-    String sesion_id = sesion_salida["sesion_id"].as<String>();
-    String horario_id = sesion_salida["horario_id"].as<String>();
-
-    // ★ EN SALIDA SIN MÉTODO DE ENTRADA PREVIO, PASAR STRING VACÍA
-    procesarRegistroEstudianteSalida(num_doc, sesion_id, horario_id, fecha, hora);
-    return;
-  }
-
-  logPrintln("✗ No hay sesiones disponibles");
+  // ★ SI NO HAY PARA ENTRADA, NO HAY NADA QUE HACER
+  logPrintln("✗ No hay sesiones disponibles para registrar");
 }
 
 String procesarRegistroEstudianteEntrada(String num_doc, String sesion_id, String horario_id, String aula, String fecha, String hora) {

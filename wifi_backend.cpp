@@ -153,7 +153,8 @@ bool notificarRegistroExitoso(const char* num_doc, uint16_t sensor_id) {
 }
 
 JsonDocument registrarAsistenciaDocente(const char* num_doc, const char* horario_id,
-                                        const char* fecha, const char* hora, const char* aula, const char* tipo_sesion) {
+                                        const char* fecha, const char* hora, const char* aula, 
+                                        const char* tipo_sesion, const char* metodo_verificacion) {
   JsonDocument solicitud;
   solicitud["num_doc"] = num_doc;
   solicitud["horario_id"] = horario_id;
@@ -161,6 +162,7 @@ JsonDocument registrarAsistenciaDocente(const char* num_doc, const char* horario
   solicitud["hora"] = hora;
   solicitud["aula"] = aula;
   solicitud["tipo_sesion"] = tipo_sesion;
+  solicitud["metodo_verificacion"] = metodo_verificacion;  // ★ NUEVO
 
   String payload;
   serializeJson(solicitud, payload);
@@ -441,4 +443,27 @@ JsonDocument confirmarComandoEjecutado(int comando_id, bool success) {
   serializeJson(solicitud, payload);
 
   return realizarPeticionHTTPS(BACKEND_HOST, "/hardware/sync/confirm", payload);
+}
+
+JsonDocument obtenerMetodoEntradaDocentePorSesion(const char* sesion_id, const char* num_doc) {
+  JsonDocument solicitud;
+  solicitud["sesion_id"] = sesion_id;
+  solicitud["num_doc"] = num_doc;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  return realizarPeticionHTTPS(BACKEND_HOST, "/hardware/docente/metodo-entrada-por-sesion", payload);
+}
+
+JsonDocument validarSesionDisponible(const char* horario_id, const char* fecha, const char* num_doc) {
+  JsonDocument solicitud;
+  solicitud["horario_id"] = horario_id;
+  solicitud["fecha"] = fecha;
+  solicitud["num_doc"] = num_doc;
+
+  String payload;
+  serializeJson(solicitud, payload);
+
+  return realizarPeticionHTTPS(BACKEND_HOST, "/hardware/docente/validar-sesion-disponible", payload);
 }
