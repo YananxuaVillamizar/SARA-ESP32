@@ -54,7 +54,7 @@ void setup() {
   Display.println("Display iniciado");
   delay(1000);
 
-  logPrintln("\n=== SARA - SISTEMA BIOMÉTRICO ===\n");
+  logPrintln("\n==== SARA - SISTEMA BIOMÉTRICO ====\n");
 
   if (!initFingerprintSensor()) {
     logPrintln("FATAL: Sensor no detectado");
@@ -89,7 +89,7 @@ void setup() {
     logPrintln("[WARN] No se pudo sincronizar la hora");
   }
 
-  logPrint("\n✓ Sistema listo\n");
+  logPrintln("\n✓ Sistema listo\n");
   mostrarMenuPrincipal();
 }
 
@@ -123,24 +123,15 @@ void loop() {
 }
 
 void mostrarMenuPrincipal() {
-  // ★ VERIFICAR COMANDOS PENDIENTES CADA 30 SEGUNDOS
   verificarComandosPendientes();
-  logPrintln("\n═══════════════════════════════════════════════════");
-  logPrintln("           SISTEMA SARA - MENÚ PRINCIPAL");
-  logPrintln("═══════════════════════════════════════════════════\n");
-  
-  logPrintln("┌─ GESTIÓN DE HUELLAS DACTILARES ─────────────────┐");
-  logPrintln("│ 1 -> Registrar huella                            │");
-  logPrintln("│ 2 -> Verificar huella                            │");
-  logPrintln("│ 3 -> Borrar todas las huellas                    │");
-  logPrintln("└────────────────────────────────────────────────────┘\n");
-  
-  logPrintln("┌─ REGISTRO DE ASISTENCIA ────────────────────────┐");
-  logPrintln("│ 4 -> Registrar asistencia (entrada/salida)       │");
-  logPrintln("└────────────────────────────────────────────────────┘\n");
-  
-  logPrintln("? -> Mostrar este menú");
-  logPrintln("═══════════════════════════════════════════════════\n");
+  logPrintln("\n====================================");
+  logPrintln("   SISTEMA SARA - MENÚ PRINCIPAL");
+  logPrintln("====================================");
+  logPrintln("| 1 -> Registrar huella             |");
+  logPrintln("| 2 -> Verificar huella             |");
+  logPrintln("| 3 -> Borrar todas las huellas     |");
+  logPrintln("| 4 -> Registrar asistencia         |");
+  logPrintln("====================================\n");
 }
 
 void iniciarFlujoPedirDocumento(String tipo_flujo) {

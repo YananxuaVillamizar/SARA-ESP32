@@ -4,6 +4,22 @@
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 
+// ★ PALETA DE COLORES
+#define COLOR_FONDO      0x2945  // Gris oscuro (Dracula)
+#define COLOR_EXITO      0x07E0  // Verde Lima
+#define COLOR_ERROR      0xF800  // Rojo Claro
+#define COLOR_INFO       0x07FF  // Cyan
+#define COLOR_INPUT      0xFFE0  // Amarillo
+#define COLOR_WARNING    0xFD20  // Naranja
+#define COLOR_TITULO     0xFFFF  // Blanco
+#define COLOR_NORMAL     0xFFFF  // Blanco (por defecto)
+
+// ★ ESTRUCTURA PARA ALMACENAR LÍNEA CON COLOR
+struct LineaConColor {
+  String texto;
+  uint16_t color;
+};
+
 class DisplayManager {
 
   public:
@@ -26,7 +42,7 @@ class DisplayManager {
 
     static const int MAX_LINES = 200;
 
-    String lines[MAX_LINES];
+    LineaConColor lines[MAX_LINES];  // ★ CAMBIO: ahora almacena color también
 
     int totalLines = 0;
 
@@ -45,6 +61,10 @@ class DisplayManager {
     bool touching = false;
 
     int lastTouchY = 0;
+
+    // ★ NUEVAS FUNCIONES AUXILIARES
+    uint16_t detectarColor(String texto);
+    String limpiarCaracteresEspeciales(String texto);
 
 };
 
@@ -74,5 +94,6 @@ inline void logPrintln() {
   Display.println("");
 
 }
+
 
 #endif
