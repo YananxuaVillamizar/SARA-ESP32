@@ -205,7 +205,7 @@ void DisplayManager::addLine(String text) {
     String temp = linea + c;
 
     // Si el carácter no cabe, guardar línea actual y comenzar nueva
-    if (tft.textWidth(temp) > 455) {
+    if (tft.textWidth(temp) > 470) {
 
       if (linea.length() > 0) {
         if (totalLines < MAX_LINES) {

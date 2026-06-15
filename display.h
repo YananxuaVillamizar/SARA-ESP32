@@ -41,6 +41,11 @@ class DisplayManager {
     // ★ Para mostrar input del keyboard en header
     void mostrarInputKeyboard(String texto);
 
+    // ★ Devuelve true si se tocó la pantalla
+    bool isTouched() {
+      return ts.touched();
+    }
+
   private:
 
     TFT_eSPI tft = TFT_eSPI();

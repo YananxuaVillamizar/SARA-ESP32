@@ -21,6 +21,9 @@ void KeyboardManager::update() {
   if (key) {
     handleKeyPress(key);
     displayInput();
+  } else {
+    // ★ Si NO hay tecla nueva, resetear el flag
+    confirmationKeyPressed = false;
   }
 }
 
@@ -44,6 +47,9 @@ String KeyboardManager::getSentInput() {
 
 void KeyboardManager::handleKeyPress(char key) {
 
+  // ★ CUALQUIER TECLA cuenta para confirmación
+  confirmationKeyPressed = true;
+  
   // ★ AGREGAR DÍGITO (0-9)
   if (key >= '0' && key <= '9') {
     if (input.length() < 20) {
@@ -68,16 +74,34 @@ void KeyboardManager::handleKeyPress(char key) {
     if (input.length() > 0) {
       inputEnviado = input;
       enviado = true;
-      
-      // ★ Mostrar en Serial como el usuario escribió
-      Serial.println(inputEnviado);
-      
       input = "";
+      delay(100);
+      while (keypad->getKey());
     }
   }
-
 }
 
 void KeyboardManager::displayInput() {
-  Display.mostrarInputKeyboard(input);
+  if (pinMode) {
+    // Mostrar asteriscos en lugar de números
+    String asteriscos = "";
+    for (int i = 0; i < input.length(); i++) {
+      asteriscos += "*";
+    }
+    Display.mostrarInputKeyboard(asteriscos);
+  } else {
+    Display.mostrarInputKeyboard(input);
+  }
+}
+
+bool KeyboardManager::anyKeyPressed() {
+  if (confirmationKeyPressed) {
+    confirmationKeyPressed = false;  // Consumir
+    return true;
+  }
+  return false;
+}
+
+void KeyboardManager::setPinMode(bool mode) {
+  pinMode = mode;
 }

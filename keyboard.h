@@ -20,6 +20,8 @@ class KeyboardManager {
     
     bool hasSentInput();  // ★ Verifica si se envió algo
     String getSentInput();  // ★ Obtiene lo que se envió
+    bool anyKeyPressed();  // ★ Devuelve true si se presionó cualquier tecla (0-9, *, #, A-D)
+    void setPinMode(bool mode);  // ★ Activar/desactivar modo PIN
 
   private:
 
@@ -40,6 +42,9 @@ class KeyboardManager {
 
     void handleKeyPress(char key);
     void displayInput();
+    bool lastKeyPressed = false;  // ★ Flag para cualquier tecla presionada
+    bool confirmationKeyPressed = false;  // ★ NUEVO: solo para confirmación
+    bool pinMode = false;  // ★ Flag para mostrar asteriscos
 
 };
 
