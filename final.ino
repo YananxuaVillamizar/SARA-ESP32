@@ -53,7 +53,6 @@ void setup() {
   Serial.begin(115200);
   Display.begin();
   Keyboard.begin(); 
-  Keyboard.setDisplay(&Display);
   Display.println("Display iniciado");
   delay(1000);
 
@@ -101,6 +100,26 @@ void loop() {
   Keyboard.update();
   Display.update();
 
+  // ★ VERIFICAR SI EL KEYBOARD ENVIÓ ALGO
+  if (Keyboard.hasSentInput()) {
+    String entrada = Keyboard.getSentInput();
+    entrada.trim();
+
+    if (entrada.length() == 0) return;
+
+    if (entrada == "1") {
+      iniciarFlujoPedirDocumento("REGISTRO");
+    } else if (entrada == "2") {
+      iniciarFlujoPedirDocumento("VERIFICACION");
+    } else if (entrada == "3") {
+      borrarTodasLasHuellas();
+    } else if (entrada == "4") {
+      iniciarFlujoPedirDocumento("ASISTENCIA");
+    } else if (entrada == "?") {
+      mostrarMenuPrincipal();
+    }
+  }
+
   if (Serial.available()) {
     String entrada = Serial.readStringUntil('\n');
     entrada.trim();
@@ -139,12 +158,6 @@ void mostrarMenuPrincipal() {
 }
 
 void iniciarFlujoPedirDocumento(String tipo_flujo) {
-  // Limpiar buffer serial completamente
-  while (Serial.available()) {
-    Serial.read();
-  }
-  delay(300);
-
   logPrintln("\nIngresa el documento del usuario:");
   logPrintln("(Ej: 1234567890)\n");
 
@@ -152,19 +165,16 @@ void iniciarFlujoPedirDocumento(String tipo_flujo) {
   unsigned long timeout = millis();
 
   while (millis() - timeout < 30000) {
-    if (Serial.available()) {
-      char c = Serial.read();
-      
-      // Solo agregar caracteres válidos
-      if ((c >= '0' && c <= '9') || c == '\n' || c == '\r') {
-        if (c == '\n' || c == '\r') {
-          if (num_doc.length() > 0) {
-            break;
-          }
-        } else {
-          num_doc += c;
-        }
+    Keyboard.update();  // ★ Permitir teclado también aquí
+    Display.update();
+
+    if (Serial.available() || Keyboard.hasSentInput()) {
+      if (Keyboard.hasSentInput()) {
+        num_doc = Keyboard.getSentInput();
+      } else if (Serial.available()) {
+        num_doc = Serial.readStringUntil('\n');
       }
+      break;
     }
     delay(50);
   }

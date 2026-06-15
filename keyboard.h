@@ -1,9 +1,10 @@
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
-bool hasInput();  // ★ Verifica si hay input disponible
+
 #include <Keypad.h>
 
 class DisplayManager;
+
 #define KEYBOARD_ROWS 4
 #define KEYBOARD_COLS 4
 
@@ -12,28 +13,20 @@ class KeyboardManager {
   public:
 
     void begin();
-
-    void setDisplay(DisplayManager* disp);  // ★ NUEVA: referencia a Display
-
-    void update();  // ★ Llamar en el loop principal
-
+    void update();
+    
     String getInput();
-
     void clearInput();
-
-    // Callback para cuando se envía
-    void setOnSendCallback(void (*callback)(String));
-
-    // ★ Funciones para leer entrada con timeout
-    String readDocument(unsigned long timeoutMs = 30000);
-    String readPIN(int digits = 4, unsigned long timeoutMs = 30000);
-    String readOption(int maxOptions, unsigned long timeoutMs = 15000);
+    
+    bool hasSentInput();  // ★ Verifica si se envió algo
+    String getSentInput();  // ★ Obtiene lo que se envió
 
   private:
 
-    Keypad* keypad = nullptr;  // ★ Puntero, no objeto directo
-
+    Keypad* keypad = nullptr;
     String input = "";
+    String inputEnviado = "";  // ★ Lo que se envió
+    bool enviado = false;  // ★ Flag de envío
 
     char keys[KEYBOARD_ROWS][KEYBOARD_COLS] = {
       {'1','2','3','A'},
@@ -45,10 +38,7 @@ class KeyboardManager {
     byte rowPins[KEYBOARD_ROWS] = {15, 4, 5, 18};
     byte colPins[KEYBOARD_COLS] = {19, 21, 22, 23};
 
-    void (*onSendCallback)(String) = nullptr;
-
     void handleKeyPress(char key);
-
     void displayInput();
 
 };

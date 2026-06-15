@@ -313,16 +313,13 @@ void DisplayManager::handleTouch() {
 
 void DisplayManager::mostrarInputKeyboard(String texto) {
 
-  // Limpiar área del input (al lado de SARA)
   tft.fillRect(120, 10, 350, 30, COLOR_FONDO);
-
-  // Dibujar el input
   tft.setTextColor(COLOR_INPUT, COLOR_FONDO);
   tft.setTextSize(2);
   tft.setCursor(130, 15);
 
   tft.print("Input: ");
   tft.print(texto);
-  tft.print("_");  // Cursor
+  tft.print("_");
 
 }
